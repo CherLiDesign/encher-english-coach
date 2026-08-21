@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { analyzeTranscript, evaluateAnswer, SAMPLE_TRANSCRIPT, seedVocabulary } from "../lib/mock-ai";
 import { enrichVocabularyItem } from "../lib/dictionary";
+import { calculateEnglishProfile } from "../lib/english-profile";
+import type { PracticeEvidence } from "../lib/english-profile";
 import { calculateGoalProgress, createDefaultGoal, isLearningGoal } from "../lib/goal-progress";
 import { roadmap, speakingExercise, weeklyFocus } from "../lib/learning-plan";
 import { applyVocabularyReview, evaluateVocabularyResponse, formatNextReview, initialReviewPlan, isVocabularyDue, normalizeVocabularyItem } from "../lib/spaced-repetition";
@@ -57,7 +59,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [practiceLane, setPracticeLane] = useState<PracticeLane>("today");
   const [cloudState, setCloudState] = useState<"connecting" | "synced" | "error">("connecting");
   const [learningGoal, setLearningGoal] = useState<LearningGoal>(() => createDefaultGoal());
-  const [practiceSessionCount, setPracticeSessionCount] = useState(0);
+  const [practiceEvidence, setPracticeEvidence] = useState<PracticeEvidence[]>([]);
   const [goalSaving, setGoalSaving] = useState(false);
 
   const currentCandidate = candidates[candidateIndex];
@@ -93,7 +95,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   useEffect(() => {
     if (!supabase) return;
     let active = true;
-    supabase.from("practice_sessions").select("results, started_at").order("started_at", { ascending: false }).limit(200).then(({ data, error }) => {
+    supabase.from("practice_sessions").select("mode, results, started_at").order("started_at", { ascending: false }).limit(200).then(({ data, error }) => {
       if (!active) return;
       if (error) {
         setCloudState("error");
@@ -106,10 +108,14 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
       });
       const savedGoal = (goalEvent?.results as { goal?: unknown } | undefined)?.goal;
       if (isLearningGoal(savedGoal)) setLearningGoal(savedGoal);
-      setPracticeSessionCount(sessions.filter((session) => {
+      setPracticeEvidence(sessions.filter((session) => {
         const results = session.results as { kind?: unknown } | null;
         return results?.kind !== "learning_goal";
-      }).length);
+      }).map((session) => ({
+        mode: session.mode === "speaking" ? "speaking" : "listening",
+        startedAt: session.started_at ?? new Date(0).toISOString(),
+        results: (session.results ?? {}) as PracticeEvidence["results"],
+      })));
     });
     return () => { active = false; };
   }, [user.id]);
@@ -204,8 +210,10 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
       const finalLength = practiceQueue.length + (repeatThisSession ? 1 : 0);
       if (practiceIndex >= finalLength - 1) {
         setPracticeComplete(true);
-        setPracticeSessionCount((count) => count + 1);
-        if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: "listening", results: { itemCount: practiceIndex + 1, finalEvaluation: evaluation }, completed_at: new Date().toISOString() });
+        const startedAt = new Date().toISOString();
+        const evidence: PracticeEvidence = { mode: "listening", startedAt, results: { itemCount: practiceIndex + 1, finalEvaluation: evaluation } };
+        setPracticeEvidence((sessions) => [evidence, ...sessions]);
+        if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: evidence.mode, results: evidence.results, completed_at: startedAt });
       } else setPracticeIndex((index) => index + 1);
     }
     setPracticeAnswer(""); setPracticeRevealed(false); setPracticeEvaluation(null);
@@ -216,8 +224,10 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     const hits = speakingExercise.keywords.filter((keyword) => normalized.includes(keyword)).length;
     const outcome = hits >= 3 && speakingAttempt.split(/\s+/).length <= 38 ? "strong" : "retry";
     setSpeakingResult(outcome);
-    setPracticeSessionCount((count) => count + 1);
-    if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: "speaking", results: { focus: weeklyFocus[0].title, attempt: speakingAttempt, outcome }, completed_at: new Date().toISOString() });
+    const startedAt = new Date().toISOString();
+    const evidence: PracticeEvidence = { mode: "speaking", startedAt, results: { focus: weeklyFocus[0].title, outcome } };
+    setPracticeEvidence((sessions) => [evidence, ...sessions]);
+    if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: evidence.mode, results: { ...evidence.results, attempt: speakingAttempt }, completed_at: startedAt });
   };
 
   return <div className="app-shell app-v2">
@@ -225,7 +235,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     {view === "home" && <Home navigate={navigate} dueCount={dueItems.length} newLearner={vocabulary.length <= seedVocabulary.length} />}
     {view === "add" && <AddPage quickWord={quickWord} setQuickWord={setQuickWord} addQuickWord={addQuickWord} startImport={startImport} />}
     {view === "practice" && <PracticeHub lane={practiceLane} setLane={setPracticeLane} navigate={navigate} dueCount={dueItems.length} analyzed={speakingAnalyzed} />}
-    {view === "me" && <MePage user={user} cloudState={cloudState} vocabulary={vocabulary} goal={learningGoal} practiceSessionCount={practiceSessionCount} goalSaving={goalSaving} saveGoal={saveLearningGoal} navigate={navigate} onSignOut={onSignOut} />}
+    {view === "me" && <MePage user={user} cloudState={cloudState} vocabulary={vocabulary} goal={learningGoal} practiceEvidence={practiceEvidence} goalSaving={goalSaving} saveGoal={saveLearningGoal} navigate={navigate} onSignOut={onSignOut} />}
     {view === "import" && <ImportPage purpose={importPurpose} transcript={transcript} setTranscript={setTranscript} runAnalysis={runAnalysis} loading={loading} navigate={navigate} />}
     {view === "review" && currentCandidate && <CandidateReview item={currentCandidate} index={candidateIndex} total={candidates.length} mode={answerMode} choose={chooseKnowledge} selfRating={selfRating} answer={answer} setAnswer={setAnswer} submit={submitAnswer} result={result} next={nextCandidate} navigate={navigate} />}
     {view === "vocabulary" && <VocabularyPage items={vocabulary} navigate={navigate} />}
@@ -271,13 +281,18 @@ function PracticeHub({ lane, setLane, navigate, dueCount, analyzed }: { lane: Pr
   </section></main>;
 }
 
-function MePage({ user, cloudState, vocabulary, goal, practiceSessionCount, goalSaving, saveGoal, navigate, onSignOut }: { user: User; cloudState: string; vocabulary: VocabularyItem[]; goal: LearningGoal; practiceSessionCount: number; goalSaving: boolean; saveGoal: (goal: LearningGoal) => Promise<void>; navigate: (view: View) => void; onSignOut: () => Promise<void> }) {
+function MePage({ user, cloudState, vocabulary, goal, practiceEvidence, goalSaving, saveGoal, navigate, onSignOut }: { user: User; cloudState: string; vocabulary: VocabularyItem[]; goal: LearningGoal; practiceEvidence: PracticeEvidence[]; goalSaving: boolean; saveGoal: (goal: LearningGoal) => Promise<void>; navigate: (view: View) => void; onSignOut: () => Promise<void> }) {
   const [today] = useState(() => new Date());
   const [editing, setEditing] = useState(false);
+  const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
   const [draftGoal, setDraftGoal] = useState<LearningGoal>(goal);
-  const progress = calculateGoalProgress(goal, vocabulary, practiceSessionCount, today);
+  const progress = calculateGoalProgress(goal, vocabulary, practiceEvidence.length, today);
+  const profile = calculateEnglishProfile(goal, vocabulary, practiceEvidence, today);
   const currentPhase = Math.min(2, Math.floor((progress.currentWeek - 1) / 4));
   const priorityLabel = goal.priority === "understanding" ? "Understand coworkers" : goal.priority === "expression" ? "Express myself" : "Balanced progress";
+  const mapMetricIds = ["workplace-vocabulary", "context-understanding", "listening-recognition", "meaning-recall", "clear-expression", "active-use"];
+  const mapMetrics = mapMetricIds.map((id) => profile.metrics.find((metric) => metric.id === id)).filter(Boolean);
+  const signed = (value: number) => value > 0 ? `+${value}` : `${value}`;
 
   const beginEditing = () => { setDraftGoal(goal); setEditing(true); };
   const submitGoal = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -294,13 +309,13 @@ function MePage({ user, cloudState, vocabulary, goal, practiceSessionCount, goal
       <div><b>{user.email}</b><span className={`cloud-label ${cloudState}`}><i />{cloudState === "synced" ? "Goal and learning evidence synced" : cloudState === "error" ? "Sync needs attention" : "Connecting to your account…"}</span></div>
     </section>
 
-    <section className="goal-hero">
-      <div className="goal-hero-heading"><span className="section-kicker">YOUR 12-WEEK GOAL</span><button type="button" onClick={beginEditing}>Adjust goal</button></div>
-      <h1>{goal.statement}</h1>
-      <div className="goal-progress-copy"><strong>{progress.overall}%</strong><span>complete</span></div>
-      <div className="goal-progress-track" role="progressbar" aria-label="Overall 12-week goal progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.overall}><span style={{ width: `${progress.overall}%` }} /></div>
-      <div className="goal-meta"><span><b>Week {progress.currentWeek} of 12</b><small>Target {progress.targetDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small></span><span><b>{goal.weeklyMinutes} min / week</b><small>{priorityLabel}</small></span></div>
-      <p className="goal-method"><Icon name="spark" /> Progress moves when your answers, practice, and future work conversations show improvement—not just when time passes.</p>
+    <section className="readiness-hero">
+      <div className="goal-hero-heading"><span className="section-kicker">CURRENT ENGLISH READINESS</span><button type="button" onClick={beginEditing}>Adjust goal</button></div>
+      <div className="readiness-main"><div><strong>{profile.readiness}</strong><span>/ 100</span><small>workplace readiness</small></div><div className="readiness-target"><small>12-WEEK TARGET</small><b>{profile.targetReadiness} / 100</b><p>{priorityLabel} · {goal.statement}</p></div></div>
+      <div className="readiness-track" role="progressbar" aria-label="Current English readiness" aria-valuemin={0} aria-valuemax={100} aria-valuenow={profile.readiness}><span style={{ width: `${profile.readiness}%` }} /><i style={{ left: `${profile.targetReadiness}%` }} /></div>
+      <div className="readiness-scale"><span>Current {profile.readiness}</span><span>Target {profile.targetReadiness}</span></div>
+      <div className="plan-progress-inline"><div><span>YOUR 12-WEEK GOAL</span><b>{progress.overall}% plan completion · Week {progress.currentWeek} of 12</b></div><div className="plan-mini-track" role="progressbar" aria-label="Overall 12-week goal progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.overall}><span style={{ width: `${progress.overall}%` }} /></div></div>
+      <p className="readiness-method"><Icon name="spark" /> Readiness estimates capability. Plan completion measures collected evidence. This is not a TOEFL score.</p>
     </section>
 
     {editing && <form className="goal-editor" onSubmit={submitGoal}>
@@ -311,6 +326,38 @@ function MePage({ user, cloudState, vocabulary, goal, practiceSessionCount, goal
       <p>Your priority changes how the overall percentage is weighted. The three milestones stay visible so progress remains balanced.</p>
       <div className="goal-editor-actions"><button type="button" onClick={() => setEditing(false)}>Cancel</button><button type="submit" disabled={goalSaving || !draftGoal.statement.trim()}>{goalSaving ? "Saving…" : "Save goal"}</button></div>
     </form>}
+
+    <section className="daily-compare">
+      <div className="compare-heading"><div><span className="section-kicker">SINCE YESTERDAY</span><h2>Your change today</h2></div><span>{today.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></div>
+      <div className="compare-grid"><article><strong>{signed(profile.readinessChange)}</strong><small>readiness points</small></article><article><strong>{signed(profile.wordsStrengthenedToday)}</strong><small>words strengthened</small></article><article><strong>{profile.practicesToday}</strong><small>practices completed</small></article></div>
+      {profile.practicesToday === 0 && profile.wordsStrengthenedToday === 0 && <button type="button" className="compare-empty" onClick={() => navigate("practice")}>No new evidence yet today · Start a focused practice <Icon name="arrow" /></button>}
+    </section>
+
+    <section className="skill-map-card">
+      <div className="section-heading"><div><span className="section-kicker">YOUR ENGLISH SKILL MAP</span><h2>See every language “muscle”</h2></div><span>Current / target</span></div>
+      <div className="skill-map" aria-label="English skill map">
+        <div className="skill-core"><span>OVERALL</span><strong>{profile.readiness}</strong><small>Target {profile.targetReadiness}</small></div>
+        {mapMetrics.map((metric, index) => metric && <button key={metric.id} type="button" className={`skill-node node-${index + 1}`} onClick={() => setExpandedMetric(metric.id)}><span>{metric.shortLabel}</span><b>{metric.value}<small>/{metric.target}</small></b></button>)}
+      </div>
+      <p className="score-confidence"><Icon name="spark" /> Scores become more reliable as you add meetings and complete practices.</p>
+    </section>
+
+    <section className="english-composition">
+      <div className="section-heading"><div><span className="section-kicker">ENGLISH COMPOSITION</span><h2>Your current ability profile</h2></div><span>vs. yesterday</span></div>
+      <div className="ability-list">{profile.metrics.map((metric) => {
+        const open = expandedMetric === metric.id;
+        const measured = metric.value !== null;
+        return <article key={metric.id} className={`${open ? "open" : ""} ${measured ? "" : "unmeasured"}`}>
+          <button type="button" aria-expanded={open} onClick={() => setExpandedMetric(open ? null : metric.id)}>
+            <div className="ability-copy"><b>{metric.label}</b><span>{measured ? `Target ${metric.target}` : "Audio required in V2"}</span></div>
+            <div className="ability-reading">{measured ? <><strong>{metric.value}</strong><em className={metric.change && metric.change > 0 ? "positive" : "steady"}>{metric.change === 0 ? "—" : signed(metric.change ?? 0)}</em></> : <strong>Not measured</strong>}<span className="ability-chevron">⌄</span></div>
+            {measured && <div className="ability-track" aria-hidden="true"><span style={{ width: `${metric.value}%` }} /><i style={{ left: `${metric.target}%` }} /></div>}
+          </button>
+          {open && <div className="ability-detail"><p>{metric.explanation}</p><div><span><small>EVIDENCE</small>{metric.evidence}</span><span><small>NEXT STEP</small>{metric.nextStep}</span></div></div>}
+        </article>;
+      })}</div>
+      <p className="measurement-note"><Icon name="lock" /> Every score links back to your private vocabulary, practice attempts, or transcript diagnosis. Pronunciation stays unscored until audio exists.</p>
+    </section>
 
     <section className="goal-phases">
       <div className="section-heading"><h2>Your 3 milestones</h2><span>Evidence-based</span></div>
@@ -326,7 +373,7 @@ function MePage({ user, cloudState, vocabulary, goal, practiceSessionCount, goal
     </section>
 
     <section className="goal-evidence">
-      <div className="section-heading"><h2>Evidence collected</h2><span>Updates automatically</span></div>
+      <div className="section-heading"><h2>Evidence behind your scores</h2><span>Updates automatically</span></div>
       <div><article><strong>{progress.evidence.personalWords}</strong><small>personal words</small></article><article><strong>{progress.evidence.reviewAttempts}</strong><small>review answers</small></article><article><strong>{progress.evidence.completedSessions}</strong><small>practices</small></article><article><strong>{progress.evidence.workTransfers}</strong><small>work transfers</small></article></div>
     </section>
 

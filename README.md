@@ -19,6 +19,9 @@ Encher turns real workplace conversations into personalized comprehension and ex
 - Functional speaking correction and active reproduction
 - Clear text-versus-audio capability boundary; recording is intentionally V2
 - An editable 12-week goal with account-synced, evidence-based progress
+- A numeric English readiness profile with current score, 12-week target, and honest day-over-day change
+- An English skill map and detailed ability rows for vocabulary, understanding, listening, recall, active use, expression, grammar, naturalness, and pronunciation
+- Evidence-backed scoring that leaves pronunciation unmeasured until audio exists
 - Three milestone bars for foundation, real-time meetings, and workplace transfer
 - Responsive mobile and desktop UI
 

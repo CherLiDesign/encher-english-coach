@@ -24,7 +24,7 @@ The MVP uses React, TypeScript, Vinext/Vite, Tailwind CSS, Supabase Auth, and Po
 4. Import → store a private conversation → generate candidates → test contextual understanding → add weak items.
 5. Vocabulary/Understand → mix context, meaning, blank, new-context, and speaker-intent exercises → record performance → update mastery.
 6. Express → show a real user turn → explain the communication problem → preserve intent → require a new attempt → evaluate and save it. Grammar and, when audio exists, pronunciation appear inside the expression task instead of as disconnected subjects.
-7. Me → define a personal 12-week outcome and weekly commitment → track progress through foundation, real-time meetings, and workplace transfer milestones.
+7. Me → compare today with the previous baseline → inspect the numeric English skill profile → define a personal 12-week outcome and weekly commitment → track progress through foundation, real-time meetings, and workplace transfer milestones.
 8. Future conversations verify whether learned vocabulary and corrected speaking patterns transferred back to work.
 
 ### Goal progress and persistence
@@ -32,6 +32,12 @@ The MVP uses React, TypeScript, Vinext/Vite, Tailwind CSS, Supabase Auth, and Po
 The Me page is a learner-goal surface, not an app settings or installation screen. The user can edit the outcome statement, start date, weekly practice target, and whether the plan should weight understanding, expression, or both equally. Goal snapshots are stored as `learning_goal` events in the existing account-scoped `practice_sessions` activity store. PostgreSQL row-level security keeps them tied to the authenticated account, so the latest goal loads after sign-in on another device without using browser storage as the source of truth.
 
 The percentage is evidence-based rather than a time-elapsed meter. It combines vocabulary recognition/context/recall, listening readiness, completed practice sessions, review attempts, and verified active use. The chosen priority changes the overall weighting while all three milestone bars remain visible. This event-backed MVP can later be normalized into a dedicated goal table without changing the UI or progress-calculation contract in `app/lib/goal-progress.ts`.
+
+### English readiness profile
+
+`app/lib/english-profile.ts` translates private learning evidence into an understandable ability profile. Workplace vocabulary, contextual understanding, listening recognition, meaning recall, and active use come from the vocabulary mastery dimensions. Clear expression, live-speech grammar, and natural workplace English begin with the current transcript diagnosis and move only when correction attempts add evidence. The displayed previous value reconstructs the state before today’s vocabulary reviews and excludes today’s speaking attempts, so the daily delta reflects actual new activity instead of elapsed time.
+
+Readiness and plan completion are intentionally separate. Readiness estimates current workplace capability on a 0–100 product scale; it is not a TOEFL score. Plan completion measures progress through the 12-week evidence plan. Each ability has its own target, explanation, evidence description, and recommended next action. Pronunciation has a `null` value until audio is available because transcript text cannot support an honest pronunciation score.
 
 ### Vocabulary feedback and memory loop
 

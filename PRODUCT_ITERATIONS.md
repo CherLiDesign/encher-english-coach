@@ -40,3 +40,7 @@ The follow-up type pass maps Encher to Material 3 display, headline, title, body
 ## Me page goal-motivation pass
 
 Me is now a personal 12-week outcome center instead of a mixture of learner progress and app-installation settings. The user can adjust the outcome, plan start, weekly time commitment, and whether understanding or expression should receive more weight. The main percentage and three phase bars respond to learning evidence—review answers, mastery dimensions, completed practice, and verified active use—while the account quietly syncs the goal across devices. Installation and app-development language were removed from the page so its first job is motivation and direction.
+
+## English composition and comparison pass
+
+Me now works like a professional capability report: it shows current workplace readiness, the 12-week target, and a “since yesterday” comparison before exposing deeper detail. A six-part skill map makes the learner’s strongest and weakest language “muscles” visible, while expandable composition rows explain every value, its evidence, its target, and the next action that can move it. Vocabulary changes are reconstructed from today’s account-backed review history and speaking changes come from today’s active correction attempts. Readiness remains distinct from plan completion, and pronunciation is deliberately marked “Not measured” until audio creates defensible evidence.

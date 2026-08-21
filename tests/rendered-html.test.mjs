@@ -121,6 +121,23 @@ test("turns Me into an editable account-backed 12-week goal tracker", async () =
   assert.match(types, /export type LearningGoal/);
 });
 
+test("visualizes an evidence-based English ability profile and daily change", async () => {
+  const [app, profile] = await Promise.all([
+    read("app/components/CoachApp.tsx"),
+    read("app/lib/english-profile.ts"),
+  ]);
+  for (const label of ["CURRENT ENGLISH READINESS", "SINCE YESTERDAY", "YOUR ENGLISH SKILL MAP", "ENGLISH COMPOSITION"]) assert.match(app, new RegExp(label));
+  for (const ability of ["Workplace Vocabulary", "Context Understanding", "Listening Recognition", "Meaning Recall", "Active Use", "Clear Expression", "Grammar in Live Speech", "Natural Workplace English", "Pronunciation"]) assert.match(profile, new RegExp(ability));
+  assert.match(app, /Not measured/);
+  assert.match(app, /Audio required in V2/);
+  assert.match(app, /This is not a TOEFL score/);
+  assert.match(profile, /wordsStrengthenedToday/);
+  assert.match(profile, /previousDimension/);
+  assert.match(profile, /practiceEvidence/);
+  assert.match(profile, /value,\n\s+previous/);
+  assert.match(profile, /"pronunciation",\n\s+"Pronunciation",\n\s+"Pronunciation",\n\s+null,\n\s+null/);
+});
+
 test("is installable as a standalone PWA", async () => {
   const [manifestText, serviceWorker, entry] = await Promise.all([
     read("public/manifest.webmanifest"),
