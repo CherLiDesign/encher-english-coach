@@ -41,6 +41,40 @@ test("implements the real-conversation listening loop", async () => {
   assert.match(mockAi, /Launch Readiness Sync/);
 });
 
+test("gives explicit answer feedback, meaning, usage, and an adaptive next review", async () => {
+  const [app, scheduler, dictionary, types] = await Promise.all([
+    read("app/components/CoachApp.tsx"),
+    read("app/lib/spaced-repetition.ts"),
+    read("app/lib/dictionary.ts"),
+    read("app/lib/types.ts"),
+  ]);
+  for (const verdict of ["Correct", "Partly correct", "Not quite", "Not known yet"]) assert.match(app, new RegExp(verdict));
+  assert.match(app, /CLEAR MEANING/);
+  assert.match(app, /How to use it/);
+  assert.match(app, /WORKPLACE EXAMPLE/);
+  assert.match(app, /NEXT REVIEW/);
+  assert.match(scheduler, /Again in this session/);
+  assert.match(scheduler, /repetitions === 0 \? 3 : repetitions === 1 \? 7/);
+  assert.match(scheduler, /history: \[attempt, \.\.\.current\.history\]/);
+  assert.match(types, /nextReviewAt: string/);
+  assert.match(dictionary, /bespoke/);
+  assert.doesNotMatch(app, /How well did you understand it/);
+});
+
+test("enriches quick-added words and preserves work-source provenance", async () => {
+  const [app, dictionary] = await Promise.all([
+    read("app/components/CoachApp.tsx"),
+    read("app/lib/dictionary.ts"),
+  ]);
+  assert.match(app, /adding meaning and examples/);
+  assert.match(app, /enrichVocabularyItem\(newItem\)/);
+  assert.match(dictionary, /Free Dictionary API/);
+  assert.match(dictionary, /api\.dictionaryapi\.dev\/api\/v2\/entries\/en/);
+  assert.match(dictionary, /From work/);
+  assert.match(dictionary, /Example supplied/);
+  assert.doesNotMatch(app, /definition: "Pending enrichment"/);
+});
+
 test("implements the professional speaking diagnosis and active correction loop", async () => {
   const app = await read("app/components/CoachApp.tsx");
   assert.match(app, /My English Error Map/);

@@ -26,6 +26,12 @@ The MVP uses React, TypeScript, Vinext/Vite, Tailwind CSS, Supabase Auth, and Po
 6. Express → show a real user turn → explain the communication problem → preserve intent → require a new attempt → evaluate and save it. Grammar and, when audio exists, pronunciation appear inside the expression task instead of as disconnected subjects.
 7. Future conversations verify whether learned vocabulary and corrected speaking patterns transferred back to work.
 
+### Vocabulary feedback and memory loop
+
+Every practice answer is evaluated as correct, partial, incorrect, or unknown. The result view always teaches the simple meaning, optional Chinese explanation, usage note, collocations, and a workplace example before continuing. Correct answers move from roughly 3 days to 7 days and then to an ease-adjusted interval; partial answers return the next day; incorrect or unknown answers repeat once later in the current session and return the next day. The answer, evaluation, interval, and next review time are stored inside the account-scoped vocabulary record.
+
+Quick-added terms are enriched through a replaceable dictionary provider chain: Encher’s curated workplace-English knowledge base first, then the no-key Free Dictionary API for general single words. Existing pending items are enriched after sign-in. Only the isolated term is eligible for external dictionary lookup; raw transcripts remain separate and private.
+
 ## PWA boundary
 
 The GitHub Pages and private-site builds share the same application source. A standalone manifest, safe-area-aware bottom navigation, install icons, and scope-aware service worker make the public version installable. The service worker uses network-first caching so private, changing learner data is not treated as a static offline source of truth.

@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { analyzeTranscript, evaluateAnswer, SAMPLE_TRANSCRIPT, seedVocabulary } from "../lib/mock-ai";
+import { enrichVocabularyItem } from "../lib/dictionary";
 import { roadmap, speakingExercise, weeklyFocus } from "../lib/learning-plan";
+import { applyVocabularyReview, evaluateVocabularyResponse, formatNextReview, initialReviewPlan, isVocabularyDue, normalizeVocabularyItem } from "../lib/spaced-repetition";
 import { supabase } from "../lib/supabase";
-import type { Candidate, View, VocabularyItem } from "../lib/types";
+import type { Candidate, View, VocabularyEvaluation, VocabularyItem, VocabularyReviewAttempt } from "../lib/types";
 
 type ImportPurpose = "listening" | "speaking";
 type PracticeLane = "today" | "vocabulary" | "understand" | "express";
@@ -36,7 +38,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [importPurpose, setImportPurpose] = useState<ImportPurpose>("listening");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>(seedVocabulary);
+  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>(seedVocabulary.map(normalizeVocabularyItem));
   const [loading, setLoading] = useState(false);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [answerMode, setAnswerMode] = useState<"choice" | "explain" | "result">("choice");
@@ -46,6 +48,8 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [practiceRevealed, setPracticeRevealed] = useState(false);
   const [practiceAnswer, setPracticeAnswer] = useState("");
+  const [practiceEvaluation, setPracticeEvaluation] = useState<VocabularyEvaluation | null>(null);
+  const [practiceQueue, setPracticeQueue] = useState<VocabularyItem[]>([]);
   const [practiceComplete, setPracticeComplete] = useState(false);
   const [speakingAttempt, setSpeakingAttempt] = useState("");
   const [speakingResult, setSpeakingResult] = useState<"" | "strong" | "retry">("");
@@ -56,7 +60,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [installed, setInstalled] = useState(() => typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true));
 
   const currentCandidate = candidates[candidateIndex];
-  const dueItems = useMemo(() => vocabulary.filter((item) => item.due), [vocabulary]);
+  const dueItems = useMemo(() => vocabulary.filter((item) => isVocabularyDue(item)), [vocabulary]);
   const activeTab = tabFor(view);
 
   useEffect(() => {
@@ -64,8 +68,22 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     let active = true;
     supabase.from("vocabulary_items").select("item_data").order("updated_at", { ascending: false }).then(async ({ data, error }) => {
       if (!active) return;
-      if (!error && data?.length) setVocabulary(data.map((row) => row.item_data as VocabularyItem));
-      if (!error && !data?.length) await supabase!.from("vocabulary_items").upsert(seedVocabulary.map((item) => ({ id: item.id, user_id: user.id, item_data: item })));
+      if (!error && data?.length) {
+        const loaded = data.map((row) => normalizeVocabularyItem(row.item_data as VocabularyItem));
+        setVocabulary(loaded);
+        const pending = loaded.filter((item) => item.enrichmentStatus === "pending" || item.definition === "Pending enrichment");
+        for (const item of pending) {
+          const enriched = normalizeVocabularyItem(await enrichVocabularyItem(item));
+          if (!active) return;
+          setVocabulary((items) => items.map((entry) => entry.id === enriched.id ? enriched : entry));
+          await supabase!.from("vocabulary_items").upsert({ id: enriched.id, user_id: user.id, item_data: enriched, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
+        }
+      }
+      if (!error && !data?.length) {
+        const seeded = seedVocabulary.map(normalizeVocabularyItem);
+        setVocabulary(seeded);
+        await supabase!.from("vocabulary_items").upsert(seeded.map((item) => ({ id: item.id, user_id: user.id, item_data: item })));
+      }
       setCloudState(error ? "error" : "synced");
     });
     return () => { active = false; };
@@ -80,7 +98,13 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   }, []);
 
   const flash = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 2400); };
-  const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const navigate = (next: View) => {
+    if (next === "today") {
+      setPracticeQueue(dueItems.slice(0, 5));
+      setPracticeIndex(0); setPracticeComplete(false); setPracticeAnswer(""); setPracticeRevealed(false); setPracticeEvaluation(null);
+    }
+    setView(next); window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const startImport = (purpose: ImportPurpose) => { setImportPurpose(purpose); navigate("import"); };
 
   const saveVocabulary = async (item: VocabularyItem) => {
@@ -93,9 +117,15 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const addQuickWord = () => {
     const term = quickWord.trim();
     if (!term) return;
-    const newItem: VocabularyItem = { ...seedVocabulary[0], id: `${term}-${Date.now()}`, term, definition: "Pending enrichment", chinese: undefined, sentence: "Quick-added during work — add source context later.", context: "Saved without interrupting your workflow.", source: "Quick Add", discoveredAt: "Today", reason: "You saved this as unfamiliar.", explanation: "The coach will enrich this item when context becomes available.", newExample: "A workplace example will be generated after enrichment.", pronunciation: "Pending", status: "Unknown", mastery: { recognition: 5, contextual: 0, listening: 0, recall: 0, activeUse: 0, pronunciation: 0 }, due: true };
+    const newItem: VocabularyItem = { ...seedVocabulary[0], id: `${term.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`, term, definition: "Looking up a trusted definition…", chinese: undefined, sentence: "Quick-added during work — no original sentence captured.", context: "Saved without interrupting your workflow.", source: "Quick Add", sourceType: "work", hasOriginalContext: false, tags: ["From work"], discoveredAt: "Today", reason: "You saved this as unfamiliar during work.", explanation: "A trusted definition is being added.", newExample: "A workplace example is being added.", pronunciation: "Looking up…", enrichmentStatus: "pending", review: initialReviewPlan(), status: "Unknown", mastery: { recognition: 5, contextual: 0, listening: 0, recall: 0, activeUse: 0, pronunciation: 0 }, due: false };
     setVocabulary((items) => [newItem, ...items]); void saveVocabulary(newItem);
-    setQuickWord(""); flash(`“${term}” saved`);
+    setQuickWord(""); flash(`“${term}” saved · adding meaning and examples`);
+    void enrichVocabularyItem(newItem).then((enrichedItem) => {
+      const enriched = normalizeVocabularyItem(enrichedItem);
+      setVocabulary((items) => items.map((item) => item.id === enriched.id ? enriched : item));
+      void saveVocabulary(enriched);
+      flash(enriched.enrichmentStatus === "ready" ? `“${term}” is ready to learn` : `“${term}” saved · add context to verify its meaning`);
+    });
   };
 
   const runAnalysis = async () => {
@@ -116,7 +146,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     else setAnswerMode("explain");
   };
   const addCandidate = (item: Candidate, status = "Learning") => {
-    const saved = { ...item, status: status as VocabularyItem["status"] };
+    const saved = normalizeVocabularyItem({ ...item, sourceType: "work", hasOriginalContext: true, tags: ["From work"], enrichmentStatus: "ready", review: initialReviewPlan(), status: status as VocabularyItem["status"] });
     setVocabulary((items) => items.some((entry) => entry.id === item.id) ? items : [saved, ...items]); void saveVocabulary(saved);
   };
   const submitAnswer = () => { const evaluation = evaluateAnswer(answer, currentCandidate); setResult(evaluation); setAnswerMode("result"); if (evaluation !== "Correct") addCandidate(currentCandidate); };
@@ -125,18 +155,22 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     else { navigate("vocabulary"); flash("Candidate check complete"); }
   };
 
-  const rateListening = (rating: "Hard" | "Almost" | "Got it") => {
-    const item = dueItems[practiceIndex % Math.max(dueItems.length, 1)];
+  const completeVocabularyReview = (evaluation: VocabularyEvaluation, promptType: VocabularyReviewAttempt["promptType"]) => {
+    const item = practiceQueue[practiceIndex];
     if (item) {
-      const gain = rating === "Got it" ? 10 : rating === "Almost" ? 5 : 1;
-      const updated = { ...item, mastery: { ...item.mastery, contextual: Math.min(100, item.mastery.contextual + gain), recall: Math.min(100, item.mastery.recall + Math.ceil(gain / 2)) } };
+      const updated = applyVocabularyReview(item, practiceAnswer, evaluation, promptType);
       setVocabulary((all) => all.map((entry) => entry.id === updated.id ? updated : entry)); void saveVocabulary(updated);
+      const alreadyQueuedAgain = practiceQueue.slice(practiceIndex + 1).some((entry) => entry.id === item.id);
+      const timesShown = practiceQueue.slice(0, practiceIndex + 1).filter((entry) => entry.id === item.id).length;
+      const repeatThisSession = (evaluation === "incorrect" || evaluation === "unknown") && !alreadyQueuedAgain && timesShown === 1 && practiceQueue.length < 8;
+      if (repeatThisSession) setPracticeQueue((queue) => [...queue, updated]);
+      const finalLength = practiceQueue.length + (repeatThisSession ? 1 : 0);
+      if (practiceIndex >= finalLength - 1) {
+        setPracticeComplete(true);
+        if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: "listening", results: { itemCount: practiceIndex + 1, finalEvaluation: evaluation }, completed_at: new Date().toISOString() });
+      } else setPracticeIndex((index) => index + 1);
     }
-    if (practiceIndex >= Math.min(5, Math.max(dueItems.length * 2, 1)) - 1) {
-      setPracticeComplete(true);
-      if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: "listening", results: { itemCount: practiceIndex + 1, finalRating: rating }, completed_at: new Date().toISOString() });
-    } else setPracticeIndex((index) => index + 1);
-    setPracticeAnswer(""); setPracticeRevealed(false);
+    setPracticeAnswer(""); setPracticeRevealed(false); setPracticeEvaluation(null);
   };
 
   const evaluateSpeakingAttempt = () => {
@@ -162,7 +196,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     {view === "import" && <ImportPage purpose={importPurpose} transcript={transcript} setTranscript={setTranscript} runAnalysis={runAnalysis} loading={loading} navigate={navigate} />}
     {view === "review" && currentCandidate && <CandidateReview item={currentCandidate} index={candidateIndex} total={candidates.length} mode={answerMode} choose={chooseKnowledge} selfRating={selfRating} answer={answer} setAnswer={setAnswer} submit={submitAnswer} result={result} next={nextCandidate} navigate={navigate} />}
     {view === "vocabulary" && <VocabularyPage items={vocabulary} navigate={navigate} />}
-    {view === "today" && <TodayListening items={dueItems} index={practiceIndex} answer={practiceAnswer} setAnswer={setPracticeAnswer} revealed={practiceRevealed} setRevealed={setPracticeRevealed} complete={practiceComplete} rate={rateListening} restart={() => { setPracticeIndex(0); setPracticeComplete(false); setPracticeRevealed(false); }} navigate={navigate} />}
+    {view === "today" && <TodayListening items={practiceQueue} index={practiceIndex} answer={practiceAnswer} setAnswer={setPracticeAnswer} revealed={practiceRevealed} setRevealed={setPracticeRevealed} evaluation={practiceEvaluation} setEvaluation={setPracticeEvaluation} complete={practiceComplete} completeReview={completeVocabularyReview} restart={() => { setPracticeIndex(0); setPracticeComplete(false); setPracticeRevealed(false); setPracticeEvaluation(null); }} navigate={navigate} />}
     {view === "sentence" && <SentencePractice navigate={navigate} />}
     {view === "speaking-practice" && <SpeakingPractice attempt={speakingAttempt} setAttempt={setSpeakingAttempt} result={speakingResult} evaluate={evaluateSpeakingAttempt} reset={() => { setSpeakingAttempt(""); setSpeakingResult(""); }} navigate={navigate} />}
     {view === "roadmap" && <RoadmapPage navigate={navigate} />}
@@ -221,16 +255,32 @@ function CandidateReview({ item, index, total, mode, choose, selfRating, answer,
 }
 
 function VocabularyPage({ items, navigate }: { items: VocabularyItem[]; navigate: (view: View) => void }) {
-  const [selected, setSelected] = useState(items[0]);
-  return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Your personal workplace language—linked to where you found it." onBack={() => navigate("practice")} /><div className="library-layout"><section className="vocab-list"><div className="list-toolbar"><span>{items.length} items</span><button onClick={() => navigate("today")}>Review due</button></div>{items.map((item) => <button key={item.id} className={selected?.id === item.id ? "selected" : ""} onClick={() => setSelected(item)}><span><b>{item.term}</b><small>{item.definition}</small></span><em>{item.status}</em></button>)}</section>{selected && <section className="vocab-detail"><div className="detail-top"><div><span className="status-pill">{selected.status}</span><h2>{selected.term}</h2><p className="pronunciation">{selected.pronunciation} <button aria-label="Audio pronunciation arrives in V2" disabled>▶</button></p></div><ProgressRing value={Math.round(Object.values(selected.mastery).reduce((a, b) => a + b, 0) / 6)} /></div><p className="definition">{selected.definition}</p>{selected.chinese && <p className="chinese">{selected.chinese}</p>}<div className="origin"><small>WHERE YOU FOUND IT · {selected.source}</small><blockquote>“{selected.sentence}”</blockquote><p>{selected.context}</p></div><h3>Mastery profile</h3><div className="mastery-grid">{Object.entries(selected.mastery).map(([key, value]) => <div key={key}><span><b>{key.replace(/([A-Z])/g, " $1")}</b><em>{value}%</em></span><i><span style={{ width: `${value}%` }} /></i></div>)}</div><div className="coach-note"><Icon name="spark" /><p><b>Why this is here</b>{selected.reason}</p></div></section>}</div></main>;
+  const [selectedId, setSelectedId] = useState(items[0]?.id ?? "");
+  const selected = items.find((item) => item.id === selectedId) ?? items[0];
+  const reviewLabel = selected?.review ? (selected.review.intervalDays === 0 ? "Due now" : new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(selected.review.dueAt))) : "Due now";
+  return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Meaning, real context, and a review plan for every word." onBack={() => navigate("practice")} /><div className="library-layout"><section className="vocab-list"><div className="list-toolbar"><span>{items.length} items</span><button onClick={() => navigate("today")}>Review due</button></div>{items.map((item) => <button key={item.id} className={selected?.id === item.id ? "selected" : ""} onClick={() => setSelectedId(item.id)}><span><b>{item.term}</b><small>{item.definition}</small></span><em>{item.enrichmentStatus === "pending" ? "Adding meaning…" : item.status}</em></button>)}</section>{selected && <section className="vocab-detail"><div className="detail-top"><div><div className="vocab-tags"><span className="status-pill">{selected.status}</span>{selected.tags?.map((tag) => <span key={tag} className="source-tag">{tag}</span>)}</div><h2>{selected.term}</h2><p className="pronunciation">{selected.pronunciation} {selected.partOfSpeech && <em>{selected.partOfSpeech}</em>} <button aria-label="Audio pronunciation arrives in V2" disabled>▶</button></p></div><ProgressRing value={Math.round(Object.values(selected.mastery).reduce((a, b) => a + b, 0) / 6)} /></div><p className="definition">{selected.definition}</p>{selected.chinese && <p className="chinese">{selected.chinese}</p>}{selected.usageNote && <div className="dictionary-usage"><b>How to use it</b><p>{selected.usageNote}</p>{selected.collocations?.length ? <small>Common: {selected.collocations.join(" · ")}</small> : null}</div>}<div className="origin"><small>{selected.hasOriginalContext ? `WHERE YOU FOUND IT · ${selected.source}` : "SUPPLIED EXAMPLE · ORIGINAL WORK SENTENCE NOT CAPTURED"}</small><blockquote>“{selected.sentence}”</blockquote><p>{selected.context}</p></div><div className="review-plan-card"><div><Icon name="clock" /><span><small>NEXT REVIEW</small><b>{reviewLabel}</b></span></div><div><span><small>CURRENT INTERVAL</small><b>{selected.review?.intervalDays ? `${selected.review.intervalDays} days` : "New"}</b></span><span><small>LAST RESULT</small><b>{selected.review?.lastResult?.replace("partial", "Partly correct") ?? "Not reviewed"}</b></span></div><p>Correct answers increase the interval. Incorrect answers return in the same session and again tomorrow.</p></div><h3>Mastery profile</h3><div className="mastery-grid">{Object.entries(selected.mastery).map(([key, value]) => <div key={key}><span><b>{key.replace(/([A-Z])/g, " $1")}</b><em>{value}%</em></span><i><span style={{ width: `${value}%` }} /></i></div>)}</div><div className="coach-note"><Icon name="spark" /><p><b>Why this is here</b>{selected.reason}</p></div></section>}</div></main>;
 }
 
-function TodayListening({ items, index, answer, setAnswer, revealed, setRevealed, complete, rate, restart, navigate }: { items: VocabularyItem[]; index: number; answer: string; setAnswer: (value: string) => void; revealed: boolean; setRevealed: (value: boolean) => void; complete: boolean; rate: (rating: "Hard" | "Almost" | "Got it") => void; restart: () => void; navigate: (view: View) => void }) {
-  const total = Math.min(5, Math.max(items.length * 2, 1)); const item = items[index % Math.max(items.length, 1)];
-  if (!item) return <main className="app-page detail-page practice-page"><PageHead title="Vocabulary practice" subtitle="Nothing is due right now." onBack={() => navigate("practice")} /><section className="practice-card empty-state"><Icon name="spark" /><h2>You’re caught up.</h2><p>Add a real conversation to create new practice.</p><button className="solid-button" onClick={() => navigate("add")}>Add conversation</button></section></main>;
-  if (complete) return <main className="app-page detail-page practice-page"><PageHead title="Session complete" subtitle="Today’s performance updated your review plan." onBack={() => navigate("practice")} /><section className="session-complete"><span>6 min</span><h2>You strengthened {Math.min(items.length, 3)} expressions.</h2><p>Next time, these will return in new workplace contexts.</p><div><b>Evidence captured</b><small>Contextual understanding + recall confidence</small></div><button className="solid-button" onClick={() => navigate("home")}>Done for now</button><button className="text-button" onClick={restart}>Practice again</button></section></main>;
-  const exercise = index % 4; const labels = ["Context recall", "Meaning recall", "Fill in the blank", "New workplace context"]; const blankSentence = item.sentence.replace(new RegExp(item.term, "i"), "______");
-  return <main className="app-page detail-page practice-page"><PageHead title="Vocabulary practice" subtitle={`${total} focused items · about 6 minutes`} onBack={() => navigate("practice")} /><div className="session-progress"><span>{index + 1} of {total}</span><i aria-label={`${Math.round(((index + 1) / total) * 100)} percent complete`}><span style={{ width: `${((index + 1) / total) * 100}%` }} /></i><small>{labels[exercise]}</small></div><section className="practice-card"><span className="exercise-type">{exercise === 3 ? "NEW CONTEXT" : "FROM YOUR MEETING"}</span>{exercise === 0 && <><p className="quote">“{item.sentence.split(item.term).map((part, partIndex, parts) => <span key={partIndex}>{part}{partIndex < parts.length - 1 && <mark>{item.term}</mark>}</span>)}”</p><h2>What did “{item.term}” mean here?</h2></>}{exercise === 1 && <><p className="focus-word">{item.term}</p><h2>Explain it without the meeting sentence.</h2></>}{exercise === 2 && <><p className="quote">“{blankSentence}”</p><h2>Which expression completes the meaning?</h2></>}{exercise === 3 && <><p className="quote">“{item.newExample}”</p><h2>What does the speaker mean now?</h2></>}{!revealed ? <><textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={exercise === 2 ? "Type the missing expression…" : "Explain it in your own words…"} rows={3} /><div className="practice-actions"><button className="text-button" onClick={() => setRevealed(true)}>I’m not sure</button><button className="solid-button" disabled={!answer.trim()} onClick={() => setRevealed(true)}>Check answer</button></div></> : <div className="answer-reveal"><small>CLEAR EXPLANATION</small><p><b>{item.term}</b> — {item.explanation}</p><div><span>How well did you understand it?</span>{(["Hard", "Almost", "Got it"] as const).map((choice) => <button key={choice} onClick={() => rate(choice)}>{choice}</button>)}</div></div>}</section></main>;
+function TodayListening({ items, index, answer, setAnswer, revealed, setRevealed, evaluation, setEvaluation, complete, completeReview, restart, navigate }: { items: VocabularyItem[]; index: number; answer: string; setAnswer: (value: string) => void; revealed: boolean; setRevealed: (value: boolean) => void; evaluation: VocabularyEvaluation | null; setEvaluation: (value: VocabularyEvaluation | null) => void; complete: boolean; completeReview: (evaluation: VocabularyEvaluation, promptType: VocabularyReviewAttempt["promptType"]) => void; restart: () => void; navigate: (view: View) => void }) {
+  const total = Math.max(items.length, 1);
+  const item = items[index];
+  if (complete) return <main className="app-page detail-page practice-page"><PageHead title="Session complete" subtitle="Your answers changed your personal review calendar." onBack={() => navigate("practice")} /><section className="session-complete"><span>Adaptive review</span><h2>Your next reviews are scheduled.</h2><p>Correct answers moved farther out. Missed words will return sooner.</p><div><b>Evidence saved to your account</b><small>Answer · evaluation · interval · next review date</small></div><button className="solid-button" onClick={() => navigate("home")}>Done for now</button><button className="text-button" onClick={restart}>Review this set again</button></section></main>;
+  if (!item) return <main className="app-page detail-page practice-page"><PageHead title="Vocabulary practice" subtitle="Nothing is due right now." onBack={() => navigate("practice")} /><section className="practice-card empty-state"><Icon name="spark" /><h2>You’re caught up.</h2><p>Your review calendar has no items due. Add a word or real conversation to create new practice.</p><button className="solid-button" onClick={() => navigate("add")}>Add learning material</button></section></main>;
+  const exercise = index % 4;
+  const labels = ["Context recall", "Meaning recall", "Fill in the blank", "New workplace context"];
+  const promptTypes: VocabularyReviewAttempt["promptType"][] = ["context", "meaning", "fill-blank", "new-context"];
+  const promptType = promptTypes[exercise];
+  const blankSentence = item.sentence.replace(new RegExp(item.term, "i"), "______");
+  const originLabel = item.hasOriginalContext ? "ORIGINAL MEETING CONTEXT" : item.sourceType === "work" ? "SUPPLIED WORKPLACE EXAMPLE" : "DICTIONARY EXAMPLE";
+  const check = (response = answer) => { setEvaluation(evaluateVocabularyResponse(response, item, promptType)); setRevealed(true); };
+  const feedback = evaluation ? {
+    correct: { title: "Correct", detail: "You understood the meaning.", symbol: "✓" },
+    partial: { title: "Partly correct", detail: "You caught part of the meaning, but one important idea was missing.", symbol: "◐" },
+    incorrect: { title: "Not quite", detail: "Your answer did not match the meaning used here.", symbol: "×" },
+    unknown: { title: "Not known yet", detail: "That’s useful evidence. We’ll teach it now and bring it back sooner.", symbol: "?" },
+  }[evaluation] : null;
+  const nextReview = evaluation ? formatNextReview(item, evaluation) : null;
+  return <main className="app-page detail-page practice-page"><PageHead title="Vocabulary practice" subtitle={`${total} focused items · answers update your review plan`} onBack={() => navigate("practice")} /><div className="session-progress"><span>{index + 1} of {total}</span><i aria-label={`${Math.round(((index + 1) / total) * 100)} percent complete`}><span style={{ width: `${((index + 1) / total) * 100}%` }} /></i><small>{labels[exercise]}</small></div><section className="practice-card"><div className="practice-origin"><span className="exercise-type">{originLabel}</span>{item.tags?.includes("From work") && <span className="work-tag">FROM WORK</span>}</div>{exercise === 0 && <><p className="quote">“{item.sentence.split(item.term).map((part, partIndex, parts) => <span key={partIndex}>{part}{partIndex < parts.length - 1 && <mark>{item.term}</mark>}</span>)}”</p><h2>What did “{item.term}” mean here?</h2></>}{exercise === 1 && <><p className="focus-word">{item.term}</p><h2>Explain it in your own words.</h2></>}{exercise === 2 && <><p className="quote">“{blankSentence}”</p><h2>Which expression completes the meaning?</h2></>}{exercise === 3 && <><p className="quote">“{item.newExample}”</p><h2>What does the speaker mean now?</h2></>}{!revealed ? <><textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={exercise === 2 ? "Type the missing expression…" : "Explain it in your own words…"} rows={3} /><div className="practice-actions"><button className="text-button" onClick={() => check("")}>I don’t know yet</button><button className="solid-button" disabled={!answer.trim()} onClick={() => check()}>Check my answer</button></div></> : feedback && nextReview && evaluation ? <div className={`answer-feedback ${evaluation}`} aria-live="polite"><div className="feedback-verdict"><span>{feedback.symbol}</span><div><h3>{feedback.title}</h3><p>{feedback.detail}</p></div></div>{answer.trim() && <div className="your-answer"><small>YOUR ANSWER</small><p>“{answer}”</p></div>}<div className="meaning-block"><small>CLEAR MEANING</small><p><b>{item.term}</b> <em>{item.partOfSpeech}</em></p><p>{item.definition}</p>{item.chinese && <p className="meaning-chinese">{item.chinese}</p>}</div>{item.usageNote && <div className="usage-note"><b>How to use it</b><p>{item.usageNote}</p></div>}<div className="feedback-example"><small>WORKPLACE EXAMPLE</small><p>“{item.newExample}”</p>{item.collocations?.length ? <p className="collocations"><b>Common:</b> {item.collocations.join(" · ")}</p> : null}</div><div className="next-review"><Icon name="clock" /><div><small>NEXT REVIEW</small><b>{nextReview.primary}</b><p>{nextReview.secondary}</p></div></div><button className="solid-button continue-review" onClick={() => completeReview(evaluation, promptType)}>{evaluation === "incorrect" || evaluation === "unknown" ? "Got it · show me again later" : "Continue"} <Icon name="arrow" /></button></div> : null}</section></main>;
 }
 
 function SentencePractice({ navigate }: { navigate: (view: View) => void }) {

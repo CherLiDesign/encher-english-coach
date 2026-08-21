@@ -29,6 +29,10 @@ Audio recording remains visibly planned but disabled in V1. This avoids pretendi
 
 The bottom navigation is now Home / Add / Practice / Me. Capture has one predictable home instead of a floating action plus duplicated mode pages. Practice uses Today / Vocabulary / Understand / Express: this reflects what the learner wants to accomplish, while grammar and pronunciation appear contextually inside expression coaching. Listening and speaking evidence still remain distinct in the learner model.
 
+## Vocabulary learning-loop correction
+
+Vocabulary practice now produces an objective result instead of asking the learner to self-grade. Every answer receives a clear verdict, meaning, Chinese support when available, usage guidance, collocations, and a workplace example. Correct answers expand through 3-day, 7-day, and adaptive intervals; partial answers return tomorrow; missed words repeat later in the same session and return tomorrow. Quick-added terms, including existing pending entries such as “bespoke,” are enriched from the workplace lexicon or a replaceable dictionary provider and tagged when they came from work.
+
 ## Typography accessibility pass
 
 The follow-up type pass maps Encher to Material 3 display, headline, title, body, and label roles. Interface labels and supporting text use a 12px minimum, normal body copy uses 14–16px with 20–24px line height, and learning sentences use 18–20px with generous leading. Sizes use `rem` so browser and operating-system text scaling remain effective.
