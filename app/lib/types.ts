@@ -60,3 +60,12 @@ export type VocabularyItem = {
 };
 
 export type Candidate = VocabularyItem & { confidence: number };
+
+export type LearningPriority = "balanced" | "understanding" | "expression";
+
+export type LearningGoal = {
+  statement: string;
+  startedAt: string;
+  weeklyMinutes: number;
+  priority: LearningPriority;
+};

@@ -18,7 +18,8 @@ Encher turns real workplace conversations into personalized comprehension and ex
 - Account/password sign-in with per-user cloud memory
 - Functional speaking correction and active reproduction
 - Clear text-versus-audio capability boundary; recording is intentionally V2
-- A 12-week improvement roadmap and weekly focus system
+- An editable 12-week goal with account-synced, evidence-based progress
+- Three milestone bars for foundation, real-time meetings, and workplace transfer
 - Responsive mobile and desktop UI
 
 ## Run locally

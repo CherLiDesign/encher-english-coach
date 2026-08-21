@@ -4,14 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { analyzeTranscript, evaluateAnswer, SAMPLE_TRANSCRIPT, seedVocabulary } from "../lib/mock-ai";
 import { enrichVocabularyItem } from "../lib/dictionary";
+import { calculateGoalProgress, createDefaultGoal, isLearningGoal } from "../lib/goal-progress";
 import { roadmap, speakingExercise, weeklyFocus } from "../lib/learning-plan";
 import { applyVocabularyReview, evaluateVocabularyResponse, formatNextReview, initialReviewPlan, isVocabularyDue, normalizeVocabularyItem } from "../lib/spaced-repetition";
 import { supabase } from "../lib/supabase";
-import type { Candidate, View, VocabularyEvaluation, VocabularyItem, VocabularyReviewAttempt } from "../lib/types";
+import type { Candidate, LearningGoal, View, VocabularyEvaluation, VocabularyItem, VocabularyReviewAttempt } from "../lib/types";
 
 type ImportPurpose = "listening" | "speaking";
 type PracticeLane = "today" | "vocabulary" | "understand" | "express";
-type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 type IconName = "home" | "listen" | "speak" | "me" | "plus" | "text" | "record" | "arrow" | "book" | "clock" | "spark" | "back" | "upload" | "check" | "lock";
 
 const glyphs: Record<IconName, string> = {
@@ -56,8 +56,9 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [speakingAnalyzed, setSpeakingAnalyzed] = useState(false);
   const [practiceLane, setPracticeLane] = useState<PracticeLane>("today");
   const [cloudState, setCloudState] = useState<"connecting" | "synced" | "error">("connecting");
-  const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
-  const [installed, setInstalled] = useState(() => typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true));
+  const [learningGoal, setLearningGoal] = useState<LearningGoal>(() => createDefaultGoal());
+  const [practiceSessionCount, setPracticeSessionCount] = useState(0);
+  const [goalSaving, setGoalSaving] = useState(false);
 
   const currentCandidate = candidates[candidateIndex];
   const dueItems = useMemo(() => vocabulary.filter((item) => isVocabularyDue(item)), [vocabulary]);
@@ -90,12 +91,28 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   }, [user.id]);
 
   useEffect(() => {
-    const captureInstall = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPrompt); };
-    const markInstalled = () => setInstalled(true);
-    window.addEventListener("beforeinstallprompt", captureInstall);
-    window.addEventListener("appinstalled", markInstalled);
-    return () => { window.removeEventListener("beforeinstallprompt", captureInstall); window.removeEventListener("appinstalled", markInstalled); };
-  }, []);
+    if (!supabase) return;
+    let active = true;
+    supabase.from("practice_sessions").select("results, started_at").order("started_at", { ascending: false }).limit(200).then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        setCloudState("error");
+        return;
+      }
+      const sessions = data ?? [];
+      const goalEvent = sessions.find((session) => {
+        const results = session.results as { kind?: unknown } | null;
+        return results?.kind === "learning_goal";
+      });
+      const savedGoal = (goalEvent?.results as { goal?: unknown } | undefined)?.goal;
+      if (isLearningGoal(savedGoal)) setLearningGoal(savedGoal);
+      setPracticeSessionCount(sessions.filter((session) => {
+        const results = session.results as { kind?: unknown } | null;
+        return results?.kind !== "learning_goal";
+      }).length);
+    });
+    return () => { active = false; };
+  }, [user.id]);
 
   const flash = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 2400); };
   const navigate = (next: View) => {
@@ -112,6 +129,26 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     const { error } = await supabase.from("vocabulary_items").upsert({ id: item.id, user_id: user.id, item_data: item, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
     if (error) { setCloudState("error"); flash("Saved here; cloud sync needs attention"); }
     else setCloudState("synced");
+  };
+
+  const saveLearningGoal = async (goal: LearningGoal) => {
+    setLearningGoal(goal);
+    if (!supabase) { flash("12-week goal updated"); return; }
+    setGoalSaving(true);
+    const { error } = await supabase.from("practice_sessions").insert({
+      user_id: user.id,
+      mode: "speaking",
+      results: { kind: "learning_goal", goal },
+      completed_at: new Date().toISOString(),
+    });
+    setGoalSaving(false);
+    if (error) {
+      setCloudState("error");
+      flash("Goal updated here; account sync needs attention");
+    } else {
+      setCloudState("synced");
+      flash("12-week goal saved to your account");
+    }
   };
 
   const addQuickWord = () => {
@@ -167,6 +204,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
       const finalLength = practiceQueue.length + (repeatThisSession ? 1 : 0);
       if (practiceIndex >= finalLength - 1) {
         setPracticeComplete(true);
+        setPracticeSessionCount((count) => count + 1);
         if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: "listening", results: { itemCount: practiceIndex + 1, finalEvaluation: evaluation }, completed_at: new Date().toISOString() });
       } else setPracticeIndex((index) => index + 1);
     }
@@ -178,13 +216,8 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     const hits = speakingExercise.keywords.filter((keyword) => normalized.includes(keyword)).length;
     const outcome = hits >= 3 && speakingAttempt.split(/\s+/).length <= 38 ? "strong" : "retry";
     setSpeakingResult(outcome);
+    setPracticeSessionCount((count) => count + 1);
     if (supabase) void supabase.from("practice_sessions").insert({ user_id: user.id, mode: "speaking", results: { focus: weeklyFocus[0].title, attempt: speakingAttempt, outcome }, completed_at: new Date().toISOString() });
-  };
-
-  const installApp = async () => {
-    if (!installPrompt) { flash("On iPhone: tap Share, then Add to Home Screen"); return; }
-    await installPrompt.prompt(); const choice = await installPrompt.userChoice;
-    if (choice.outcome === "accepted") { setInstalled(true); setInstallPrompt(null); }
   };
 
   return <div className="app-shell app-v2">
@@ -192,7 +225,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     {view === "home" && <Home navigate={navigate} dueCount={dueItems.length} newLearner={vocabulary.length <= seedVocabulary.length} />}
     {view === "add" && <AddPage quickWord={quickWord} setQuickWord={setQuickWord} addQuickWord={addQuickWord} startImport={startImport} />}
     {view === "practice" && <PracticeHub lane={practiceLane} setLane={setPracticeLane} navigate={navigate} dueCount={dueItems.length} analyzed={speakingAnalyzed} />}
-    {view === "me" && <MePage user={user} cloudState={cloudState} vocabulary={vocabulary} installed={installed} installApp={installApp} navigate={navigate} onSignOut={onSignOut} />}
+    {view === "me" && <MePage user={user} cloudState={cloudState} vocabulary={vocabulary} goal={learningGoal} practiceSessionCount={practiceSessionCount} goalSaving={goalSaving} saveGoal={saveLearningGoal} navigate={navigate} onSignOut={onSignOut} />}
     {view === "import" && <ImportPage purpose={importPurpose} transcript={transcript} setTranscript={setTranscript} runAnalysis={runAnalysis} loading={loading} navigate={navigate} />}
     {view === "review" && currentCandidate && <CandidateReview item={currentCandidate} index={candidateIndex} total={candidates.length} mode={answerMode} choose={chooseKnowledge} selfRating={selfRating} answer={answer} setAnswer={setAnswer} submit={submitAnswer} result={result} next={nextCandidate} navigate={navigate} />}
     {view === "vocabulary" && <VocabularyPage items={vocabulary} navigate={navigate} />}
@@ -238,9 +271,70 @@ function PracticeHub({ lane, setLane, navigate, dueCount, analyzed }: { lane: Pr
   </section></main>;
 }
 
-function MePage({ user, cloudState, vocabulary, installed, installApp, navigate, onSignOut }: { user: User; cloudState: string; vocabulary: VocabularyItem[]; installed: boolean; installApp: () => Promise<void>; navigate: (view: View) => void; onSignOut: () => Promise<void> }) {
-  const avg = Math.round(vocabulary.reduce((total, item) => total + Object.values(item.mastery).reduce((a, b) => a + b, 0) / 6, 0) / Math.max(vocabulary.length, 1));
-  return <main className="app-page me-page"><section className="profile-card"><span className="profile-avatar">{(user.email?.slice(0, 2) || "ME").toUpperCase()}</span><div><h1>Your learning system</h1><p>{user.email}</p><span className={`cloud-label ${cloudState}`}><i />{cloudState === "synced" ? "Learning memory synced" : cloudState === "error" ? "Sync needs attention" : "Connecting…"}</span></div></section><section className="progress-overview"><div className="section-heading"><h2>This month</h2><span>Evidence, not streaks</span></div><div><article><strong>{vocabulary.length}</strong><small>personal words</small></article><article><strong>{avg}%</strong><small>average mastery</small></article><article><strong>3</strong><small>work transfers</small></article></div></section><section className="week-focus"><span className="section-kicker">THIS WEEK</span><h2>Your Top 2 Focus Areas</h2>{weeklyFocus.map((focus, index) => <button key={focus.title} onClick={() => navigate(index === 0 ? "speaking-practice" : "practice")}><span>0{index + 1}</span><div><b>{focus.title}</b><small>{focus.evidence}</small></div><Icon name="arrow" /></button>)}</section><section className="me-list"><button onClick={() => navigate("roadmap")}><span><Icon name="clock" /></span><div><b>12-week breakthrough plan</b><small>Foundation → real-time meetings → transfer</small></div><Icon name="arrow" /></button><button onClick={() => void installApp()}><span><Icon name="home" /></span><div><b>{installed ? "Installed on this device" : "Install Encher on your phone"}</b><small>{installed ? "Opens like a standalone app" : "On iPhone: Share → Add to Home Screen"}</small></div>{installed ? <Icon name="check" /> : <Icon name="arrow" />}</button><button onClick={() => navigate("vocabulary")}><span><Icon name="lock" /></span><div><b>Privacy & learning data</b><small>Private by default · tied to your account</small></div><Icon name="arrow" /></button></section><button className="signout-row" onClick={() => void onSignOut()}>Sign out</button></main>;
+function MePage({ user, cloudState, vocabulary, goal, practiceSessionCount, goalSaving, saveGoal, navigate, onSignOut }: { user: User; cloudState: string; vocabulary: VocabularyItem[]; goal: LearningGoal; practiceSessionCount: number; goalSaving: boolean; saveGoal: (goal: LearningGoal) => Promise<void>; navigate: (view: View) => void; onSignOut: () => Promise<void> }) {
+  const [today] = useState(() => new Date());
+  const [editing, setEditing] = useState(false);
+  const [draftGoal, setDraftGoal] = useState<LearningGoal>(goal);
+  const progress = calculateGoalProgress(goal, vocabulary, practiceSessionCount, today);
+  const currentPhase = Math.min(2, Math.floor((progress.currentWeek - 1) / 4));
+  const priorityLabel = goal.priority === "understanding" ? "Understand coworkers" : goal.priority === "expression" ? "Express myself" : "Balanced progress";
+
+  const beginEditing = () => { setDraftGoal(goal); setEditing(true); };
+  const submitGoal = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = { ...draftGoal, statement: draftGoal.statement.trim(), weeklyMinutes: Math.min(420, Math.max(30, draftGoal.weeklyMinutes)) };
+    if (!normalized.statement) return;
+    await saveGoal(normalized);
+    setEditing(false);
+  };
+
+  return <main className="app-page me-page goal-page">
+    <section className="goal-account-bar">
+      <span className="profile-avatar">{(user.email?.slice(0, 2) || "ME").toUpperCase()}</span>
+      <div><b>{user.email}</b><span className={`cloud-label ${cloudState}`}><i />{cloudState === "synced" ? "Goal and learning evidence synced" : cloudState === "error" ? "Sync needs attention" : "Connecting to your account…"}</span></div>
+    </section>
+
+    <section className="goal-hero">
+      <div className="goal-hero-heading"><span className="section-kicker">YOUR 12-WEEK GOAL</span><button type="button" onClick={beginEditing}>Adjust goal</button></div>
+      <h1>{goal.statement}</h1>
+      <div className="goal-progress-copy"><strong>{progress.overall}%</strong><span>complete</span></div>
+      <div className="goal-progress-track" role="progressbar" aria-label="Overall 12-week goal progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.overall}><span style={{ width: `${progress.overall}%` }} /></div>
+      <div className="goal-meta"><span><b>Week {progress.currentWeek} of 12</b><small>Target {progress.targetDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small></span><span><b>{goal.weeklyMinutes} min / week</b><small>{priorityLabel}</small></span></div>
+      <p className="goal-method"><Icon name="spark" /> Progress moves when your answers, practice, and future work conversations show improvement—not just when time passes.</p>
+    </section>
+
+    {editing && <form className="goal-editor" onSubmit={submitGoal}>
+      <div className="goal-editor-heading"><div><span className="section-kicker">ADJUST YOUR PLAN</span><h2>What does a breakthrough mean to you?</h2></div><button type="button" onClick={() => setEditing(false)} aria-label="Close goal editor">×</button></div>
+      <label>Your 12-week outcome<textarea rows={3} maxLength={180} value={draftGoal.statement} onChange={(event) => setDraftGoal({ ...draftGoal, statement: event.target.value })} /></label>
+      <div className="goal-editor-row"><label>Start date<input type="date" value={draftGoal.startedAt} onChange={(event) => setDraftGoal({ ...draftGoal, startedAt: event.target.value })} /></label><label>Weekly practice target<input type="number" min={30} max={420} step={15} value={draftGoal.weeklyMinutes} onChange={(event) => setDraftGoal({ ...draftGoal, weeklyMinutes: Number(event.target.value) })} /></label></div>
+      <label>Main priority<select value={draftGoal.priority} onChange={(event) => setDraftGoal({ ...draftGoal, priority: event.target.value as LearningGoal["priority"] })}><option value="balanced">Balanced: understand + express</option><option value="understanding">Understand coworkers in real time</option><option value="expression">Express myself clearly</option></select></label>
+      <p>Your priority changes how the overall percentage is weighted. The three milestones stay visible so progress remains balanced.</p>
+      <div className="goal-editor-actions"><button type="button" onClick={() => setEditing(false)}>Cancel</button><button type="submit" disabled={goalSaving || !draftGoal.statement.trim()}>{goalSaving ? "Saving…" : "Save goal"}</button></div>
+    </form>}
+
+    <section className="goal-phases">
+      <div className="section-heading"><h2>Your 3 milestones</h2><span>Evidence-based</span></div>
+      <div className="goal-phase-list">{roadmap.map((phase, index) => {
+        const phaseProgress = progress.phases[index];
+        return <article key={phase.weeks} className={index === currentPhase ? "current" : ""}>
+          <div className="goal-phase-top"><span>0{index + 1} · {phase.weeks}</span><strong>{phaseProgress.progress}%</strong></div>
+          <div className="goal-phase-track" role="progressbar" aria-label={`${phase.title} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={phaseProgress.progress}><span style={{ width: `${phaseProgress.progress}%` }} /></div>
+          <h3>{phase.title}</h3><p>{phase.target}</p><small>{phaseProgress.evidence}</small>
+          {index === currentPhase && <em>CURRENT PHASE</em>}
+        </article>;
+      })}</div>
+    </section>
+
+    <section className="goal-evidence">
+      <div className="section-heading"><h2>Evidence collected</h2><span>Updates automatically</span></div>
+      <div><article><strong>{progress.evidence.personalWords}</strong><small>personal words</small></article><article><strong>{progress.evidence.reviewAttempts}</strong><small>review answers</small></article><article><strong>{progress.evidence.completedSessions}</strong><small>practices</small></article><article><strong>{progress.evidence.workTransfers}</strong><small>work transfers</small></article></div>
+    </section>
+
+    <section className="week-focus goal-week-focus"><span className="section-kicker">THIS WEEK</span><h2>Your Top 2 Focus Areas</h2>{weeklyFocus.map((focus, index) => <button key={focus.title} onClick={() => navigate(index === 0 ? "speaking-practice" : "practice")}><span>0{index + 1}</span><div><b>{focus.title}</b><small>{focus.evidence}</small></div><Icon name="arrow" /></button>)}</section>
+
+    <section className="goal-account-footer"><span><Icon name="lock" /></span><div><b>Private account memory</b><small>{user.email} · your goal and learning evidence stay tied to this account</small></div></section>
+    <button className="signout-row" onClick={() => void onSignOut()}>Sign out</button>
+  </main>;
 }
 
 function PageHead({ title, subtitle, onBack }: { title: string; subtitle: string; onBack: () => void }) { return <div className="page-head"><button className="back" onClick={onBack}><Icon name="back" /> Back</button><h1>{title}</h1><p>{subtitle}</p></div>; }

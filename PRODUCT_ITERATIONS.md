@@ -36,3 +36,7 @@ Vocabulary practice now produces an objective result instead of asking the learn
 ## Typography accessibility pass
 
 The follow-up type pass maps Encher to Material 3 display, headline, title, body, and label roles. Interface labels and supporting text use a 12px minimum, normal body copy uses 14–16px with 20–24px line height, and learning sentences use 18–20px with generous leading. Sizes use `rem` so browser and operating-system text scaling remain effective.
+
+## Me page goal-motivation pass
+
+Me is now a personal 12-week outcome center instead of a mixture of learner progress and app-installation settings. The user can adjust the outcome, plan start, weekly time commitment, and whether understanding or expression should receive more weight. The main percentage and three phase bars respond to learning evidence—review answers, mastery dimensions, completed practice, and verified active use—while the account quietly syncs the goal across devices. Installation and app-development language were removed from the page so its first job is motivation and direction.

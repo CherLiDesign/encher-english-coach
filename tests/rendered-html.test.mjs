@@ -99,6 +99,28 @@ test("requires an account and scopes cloud memory to its owner", async () => {
   assert.match(migration, /revoke all .* from anon/i);
 });
 
+test("turns Me into an editable account-backed 12-week goal tracker", async () => {
+  const [app, progress, types] = await Promise.all([
+    read("app/components/CoachApp.tsx"),
+    read("app/lib/goal-progress.ts"),
+    read("app/lib/types.ts"),
+  ]);
+  assert.match(app, /YOUR 12-WEEK GOAL/);
+  assert.match(app, /Adjust goal/);
+  assert.match(app, /Weekly practice target/);
+  assert.match(app, /Main priority/);
+  assert.match(app, /Your 3 milestones/);
+  assert.match(app, /kind: "learning_goal"/);
+  assert.match(app, /saved to your account/);
+  assert.doesNotMatch(app, /Installed on this device/);
+  assert.doesNotMatch(app, /Install Encher on your phone/);
+  assert.match(progress, /dimensionAverage/);
+  assert.match(progress, /workTransfers/);
+  assert.match(progress, /progressWeights/);
+  assert.match(progress, /completedSessions/);
+  assert.match(types, /export type LearningGoal/);
+});
+
 test("is installable as a standalone PWA", async () => {
   const [manifestText, serviceWorker, entry] = await Promise.all([
     read("public/manifest.webmanifest"),
