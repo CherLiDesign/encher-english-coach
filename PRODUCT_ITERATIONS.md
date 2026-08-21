@@ -24,3 +24,7 @@ Each round removed friction or strengthened the real-conversation learning loop.
 20. Built and verified both production targets, then prepared public deployment.
 
 Audio recording remains visibly planned but disabled in V1. This avoids pretending that text can diagnose pronunciation and keeps the first release focused on reliable learning outcomes.
+
+## Typography accessibility pass
+
+The follow-up type pass maps Encher to Material 3 display, headline, title, body, and label roles. Interface labels and supporting text use a 12px minimum, normal body copy uses 14–16px with 20–24px line height, and learning sentences use 18–20px with generous leading. Sizes use `rem` so browser and operating-system text scaling remain effective.

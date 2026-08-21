@@ -92,3 +92,88 @@ body { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
 }
 @media (max-width:380px) { .home-quick > div:last-child,.practice-pulse { grid-template-columns:1fr; }.mission-card h2 { font-size:22px; }.app-page { padding-left:14px; padding-right:14px; }.progress-overview > div:last-child { gap:6px; }.progress-overview article { padding-left:5px; padding-right:5px; } }
 .first-week-card { display:flex; gap:11px; margin-top:14px; padding:14px 16px; border:1px solid #d5dfd9; border-radius:14px; background:#edf3ef; }.first-week-card > span { color:var(--green); }.first-week-card b { font-size:10px; }.first-week-card p { margin:4px 0 0; color:var(--muted); font-size:9px; line-height:1.5; }.speaking-feedback > small { display:block; margin:8px 0; color:var(--muted); font-size:9px; }
+
+/* Material 3-inspired type system. Learning content never drops below 12px. */
+:root {
+  --type-display-small: 2.25rem;
+  --type-headline-large: 2rem;
+  --type-headline-medium: 1.75rem;
+  --type-headline-small: 1.5rem;
+  --type-title-large: 1.375rem;
+  --type-title-medium: 1rem;
+  --type-title-small: .875rem;
+  --type-body-large: 1rem;
+  --type-body-medium: .875rem;
+  --type-body-small: .75rem;
+  --type-label-large: .875rem;
+  --type-label-medium: .75rem;
+  --type-label-small: .75rem;
+}
+
+html { font-size:100%; -webkit-text-size-adjust:100%; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:var(--type-body-large); line-height:1.5; }
+h1,h2,.mode-title { font-family:ui-serif,Georgia,"Times New Roman",serif; }
+
+/* Authentication: body, label, and action roles */
+.auth-step,.auth-story small { font-size:var(--type-label-medium); line-height:1rem; }
+.auth-form > p,.auth-message,.auth-switch { font-size:var(--type-body-medium); line-height:1.25rem; }
+.auth-form label,.auth-submit { font-size:var(--type-label-large); line-height:1.25rem; }
+.auth-form input { font-size:var(--type-body-large); line-height:1.5rem; }
+
+/* Shared app roles */
+.app-v2 { font-size:var(--type-body-medium); line-height:1.25rem; }
+.app-v2 h1 { font-size:var(--type-headline-large); line-height:2.5rem; }
+.app-v2 h2 { font-size:var(--type-headline-small); line-height:2rem; }
+.app-v2 h3 { font-size:var(--type-title-medium); line-height:1.5rem; }
+.app-v2 p { font-size:var(--type-body-medium); line-height:1.25rem; }
+.app-v2 small,.app-v2 em { font-size:var(--type-body-small); line-height:1rem; }
+.app-v2 b { font-size:var(--type-title-small); line-height:1.25rem; }
+.app-v2 button { font-size:var(--type-label-large); line-height:1.25rem; }
+.app-v2 label { font-size:var(--type-label-large); line-height:1.25rem; }
+.app-v2 .eyebrow,.app-v2 .section-kicker,.app-v2 .exercise-type,.app-v2 .auth-step { font-size:var(--type-label-medium); line-height:1rem; letter-spacing:.1em; }
+
+/* Dense UI labels use the 12/16 role instead of miniature display text. */
+.app-v2 .app-nav button small,
+.app-v2 .section-heading > span,
+.app-v2 .why-row span:last-child,
+.app-v2 .source-date,
+.app-v2 .flow-steps span,
+.app-v2 .analysis-preview span,
+.app-v2 .context-label,
+.app-v2 .term-chip,
+.app-v2 .result-label,
+.app-v2 .status-pill,
+.app-v2 .phase-pill,
+.app-v2 .list-toolbar,
+.app-v2 .mastery-grid > div > span,
+.app-v2 .session-progress,
+.app-v2 .practice-tags span,
+.app-v2 .meeting-card > span,
+.app-v2 .analysis-ready span:last-child,
+.app-v2 .cloud-label,
+.app-v2 .retry-actions span,
+.app-v2 .loop-step > span,
+.app-v2 .loop-number,
+.app-v2 .coach-diagnosis div > span,
+.app-v2 .north-star > span { font-size:var(--type-label-medium); line-height:1rem; }
+
+/* Educational material receives a larger reading role. */
+.app-v2 .definition { font-size:1.25rem; line-height:1.875rem; }
+.app-v2 .context-card blockquote,
+.app-v2 .practice-card .quote,
+.app-v2 .answer-reveal > p,
+.app-v2 .loop-step blockquote,
+.app-v2 .clearer-version p,
+.app-v2 .sentence-card .quote { font-size:1.125rem; line-height:1.75rem; }
+.app-v2 .intent-compare p,.app-v2 .coach-diagnosis p,.app-v2 .speaking-feedback p { font-size:var(--type-body-medium); line-height:1.25rem; }
+.app-v2 .mission-card > p,.app-v2 .priority-practice p { font-size:var(--type-body-medium); line-height:1.25rem; }
+.app-v2 .capture-fab { font-size:1.6875rem; line-height:1; }
+
+@media (max-width:760px) {
+  .auth-story p { font-size:var(--type-body-medium); line-height:1.25rem; }
+  .auth-story small { font-size:var(--type-body-small); line-height:1rem; }
+  .app-v2 h1 { font-size:var(--type-headline-large); line-height:2.5rem; }
+  .app-v2 h2 { font-size:var(--type-headline-small); line-height:2rem; }
+  .app-v2 .home-quick > div:last-child,.app-v2 .practice-pulse { grid-template-columns:1fr; }
+  .app-v2 .practice-pulse button { min-height:104px; }
+}

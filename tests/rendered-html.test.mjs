@@ -70,6 +70,17 @@ test("is installable as a standalone PWA", async () => {
   await access(new URL("public/icon-512.png", root));
 });
 
+test("uses a Material 3-inspired readable type scale", async () => {
+  const css = await read("app/globals.css");
+  assert.match(css, /--type-body-large:\s*1rem/);
+  assert.match(css, /--type-body-medium:\s*\.875rem/);
+  assert.match(css, /--type-body-small:\s*\.75rem/);
+  assert.match(css, /--type-label-large:\s*\.875rem/);
+  assert.match(css, /Learning content never drops below 12px/);
+  assert.match(css, /\.app-v2 p \{ font-size:var\(--type-body-medium\); line-height:1\.25rem; \}/);
+  assert.match(css, /\.app-v2 \.practice-card \.quote/);
+});
+
 test("produces a deployable GitHub Pages bundle", async () => {
   await access(new URL("docs/index.html", root));
   const html = await read("docs/index.html");
