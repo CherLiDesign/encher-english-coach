@@ -1,91 +1,52 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const root = new URL("../", import.meta.url);
+const read = (path) => readFile(new URL(path, root), "utf8");
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
-}
-
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
+test("keeps listening and speaking as separate primary experiences", async () => {
+  const app = await read("app/components/CoachApp.tsx");
+  assert.match(app, /Practice Listening/);
+  assert.match(app, /Practice Speaking/);
+  assert.match(app, /view === "today"/);
+  assert.match(app, /view === "speaking"/);
+  assert.match(app, /TodayListening/);
+  assert.match(app, /SpeakingPractice/);
 });
 
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
+test("implements the real-conversation listening loop", async () => {
+  const [app, mockAi] = await Promise.all([
+    read("app/components/CoachApp.tsx"),
+    read("app/lib/mock-ai.ts"),
   ]);
+  assert.match(app, /Quick Add Word/);
+  assert.match(app, /Import a conversation/);
+  assert.match(app, /Vocabulary check/);
+  assert.match(app, /Context recall/);
+  assert.match(app, /Meaning recall/);
+  assert.match(app, /Fill in the blank/);
+  assert.match(app, /New workplace context/);
+  assert.match(mockAi, /Launch Readiness Sync/);
+});
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+test("requires an account and scopes cloud memory to its owner", async () => {
+  const [auth, app, migration] = await Promise.all([
+    read("app/components/AuthGate.tsx"),
+    read("app/components/CoachApp.tsx"),
+    read("supabase/migrations/20260821070000_user_memory.sql"),
+  ]);
+  assert.match(auth, /signInWithPassword/);
+  assert.match(auth, /signUp/);
+  assert.match(app, /user_id: user\.id/);
+  assert.match(migration, /enable row level security/g);
+  assert.match(migration, /auth\.uid\(\)/);
+  assert.match(migration, /revoke all .* from anon/i);
+});
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
-
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
-
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+test("produces a deployable GitHub Pages bundle", async () => {
+  await access(new URL("docs/index.html", root));
+  const html = await read("docs/index.html");
+  assert.match(html, /<div id="root"><\/div>/);
+  assert.match(html, /encher-english-coach\/assets\//);
 });

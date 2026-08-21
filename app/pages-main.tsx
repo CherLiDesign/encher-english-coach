@@ -1,10 +1,11 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { CoachApp } from "./components/CoachApp";
+import { AuthGate } from "./components/AuthGate";
 import "./globals.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <CoachApp />
+    <AuthGate>{(user, signOut) => <CoachApp user={user} onSignOut={signOut} />}</AuthGate>
   </React.StrictMode>,
 );
