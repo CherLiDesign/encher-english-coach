@@ -1,13 +1,13 @@
 # Encher — Personal AI English Coach
 
-Encher turns real workplace conversations into personalized listening and speaking practice. This repository contains an installable, responsive PWA with account-based cloud memory, a functional Listening vertical slice, and an active Speaking correction loop.
+Encher turns real workplace conversations into personalized comprehension and expression practice. This repository contains an installable, responsive PWA with account-based cloud memory, a functional vocabulary/understanding vertical slice, and an active expression correction loop.
 
 ## Included in the MVP
 
-- App-like Home / Listen / Speak / Me navigation
-- Global Quick Capture plus capture-first Listen and Speak pages
+- App-like Home / Add / Practice / Me navigation
+- One dedicated Add destination for quick words and meeting text
 - Installable PWA for iPhone and desktop
-- Separate Listening and Speaking learning experiences
+- Practice tabs organized by outcome: Today / Vocabulary / Understand / Express
 - Quick Add Word with cloud persistence
 - Transcript import and candidate detection
 - Contextual vocabulary checks

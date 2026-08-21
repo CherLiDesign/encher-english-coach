@@ -5,13 +5,25 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("uses the four-tab app architecture while keeping Listen and Speak separate", async () => {
+test("uses the action-based four-tab app architecture", async () => {
   const app = await read("app/components/CoachApp.tsx");
-  for (const tab of ["Home", "Listen", "Speak", "Me"]) assert.match(app, new RegExp(`label: "${tab}"`));
+  for (const tab of ["Home", "Add", "Practice", "Me"]) assert.match(app, new RegExp(`label: "${tab}"`));
+  assert.doesNotMatch(app, /label: "Listen"/);
+  assert.doesNotMatch(app, /label: "Speak"/);
+  assert.match(app, /function AddPage/);
+  assert.match(app, /function PracticeHub/);
   assert.match(app, /view === "today"/);
-  assert.match(app, /view === "speaking"/);
   assert.match(app, /TodayListening/);
   assert.match(app, /SpeakingPractice/);
+});
+
+test("organizes practice around communication outcomes", async () => {
+  const app = await read("app/components/CoachApp.tsx");
+  for (const lane of ["Today", "Vocabulary", "Understand", "Express"]) assert.match(app, new RegExp(`label: "${lane}"`));
+  assert.match(app, /Choose an outcome, not a school subject/);
+  assert.match(app, /Pronunciation joins Express when audio arrives in V2/);
+  assert.doesNotMatch(app, /label: "Grammar"/);
+  assert.doesNotMatch(app, /label: "Pronunciation"/);
 });
 
 test("implements the real-conversation listening loop", async () => {
@@ -20,7 +32,7 @@ test("implements the real-conversation listening loop", async () => {
     read("app/lib/mock-ai.ts"),
   ]);
   assert.match(app, /Add it before you forget it/);
-  assert.match(app, /Paste meeting transcript/);
+  assert.match(app, /Meeting transcript/);
   assert.match(app, /Vocabulary check/);
   assert.match(app, /Context recall/);
   assert.match(app, /Meaning recall/);

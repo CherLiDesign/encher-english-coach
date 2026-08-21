@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Listening and Speaking are separate product surfaces backed by one authenticated learner model. Every learning item keeps a path to the work conversation that produced it. The shell uses four stable destinations—Home, Listen, Speak, and Me—plus a global capture action, so navigation stays app-like on a phone.
+Comprehension and expression remain distinct learning interventions backed by one authenticated learner model. Every learning item keeps a path to the work conversation that produced it. The shell uses four action-based destinations—Home, Add, Practice, and Me. Add owns all capture; Practice organizes learning by outcome through Today, Vocabulary, Understand, and Express.
 
 ## Runtime and folders
 
@@ -19,11 +19,11 @@ The MVP uses React, TypeScript, Vinext/Vite, Tailwind CSS, Supabase Auth, and Po
 ## Main user flows
 
 1. Sign in → load only the authenticated user’s vocabulary and history.
-2. Home → see one prioritized next session, bring in today’s work, or enter Listen/Speak separately.
-3. Global Quick Capture → save a term or route a transcript into Listening/Speaking in seconds.
+2. Home → see one prioritized next session or jump to Add/Practice.
+3. Add → save a term or route meeting text into comprehension/expression diagnosis in seconds.
 4. Import → store a private conversation → generate candidates → test contextual understanding → add weak items.
-5. Today’s Listening → mix context, meaning, blank, and new-context exercises → record performance → update mastery.
-6. Speaking → show a real user turn → explain the communication problem → preserve intent → require a new attempt → evaluate and save it.
+5. Vocabulary/Understand → mix context, meaning, blank, new-context, and speaker-intent exercises → record performance → update mastery.
+6. Express → show a real user turn → explain the communication problem → preserve intent → require a new attempt → evaluate and save it. Grammar and, when audio exists, pronunciation appear inside the expression task instead of as disconnected subjects.
 7. Future conversations verify whether learned vocabulary and corrected speaking patterns transferred back to work.
 
 ## PWA boundary

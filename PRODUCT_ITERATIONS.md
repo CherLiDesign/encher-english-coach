@@ -25,6 +25,10 @@ Each round removed friction or strengthened the real-conversation learning loop.
 
 Audio recording remains visibly planned but disabled in V1. This avoids pretending that text can diagnose pronunciation and keeps the first release focused on reliable learning outcomes.
 
+## Information architecture follow-up
+
+The bottom navigation is now Home / Add / Practice / Me. Capture has one predictable home instead of a floating action plus duplicated mode pages. Practice uses Today / Vocabulary / Understand / Express: this reflects what the learner wants to accomplish, while grammar and pronunciation appear contextually inside expression coaching. Listening and speaking evidence still remain distinct in the learner model.
+
 ## Typography accessibility pass
 
 The follow-up type pass maps Encher to Material 3 display, headline, title, body, and label roles. Interface labels and supporting text use a 12px minimum, normal body copy uses 14–16px with 20–24px line height, and learning sentences use 18–20px with generous leading. Sizes use `rem` so browser and operating-system text scaling remain effective.
