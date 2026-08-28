@@ -45,6 +45,8 @@ Every practice answer is evaluated as correct, partial, incorrect, or unknown. T
 
 Quick-added terms are enriched through a replaceable dictionary provider chain: Encher’s curated workplace-English knowledge base first, then the no-key Free Dictionary API for general single words. Existing pending items are enriched after sign-in. Only the isolated term is eligible for external dictionary lookup; raw transcripts remain separate and private.
 
+Quick Add now treats PostgreSQL as the source of truth instead of optimistic in-memory state. The Add input stays unavailable until the authenticated vocabulary snapshot has loaded, eliminating the startup race that could replace a newly added word with an older snapshot. A new word remains in the input until an upsert returns the saved row through `.select().single()`. Failure produces an explicit retry state; success produces an account-save receipt and an entry in Recently Saved. Dictionary enrichment happens only after that durable first write, so an enrichment failure can delay the meaning but cannot remove the original word.
+
 ## PWA boundary
 
 The GitHub Pages and private-site builds share the same application source. A standalone manifest, safe-area-aware bottom navigation, install icons, and scope-aware service worker make the public version installable. The service worker uses network-first caching so private, changing learner data is not treated as a static offline source of truth.

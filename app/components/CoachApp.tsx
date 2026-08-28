@@ -14,6 +14,7 @@ import type { Candidate, LearningGoal, View, VocabularyEvaluation, VocabularyIte
 
 type ImportPurpose = "listening" | "speaking";
 type PracticeLane = "today" | "vocabulary" | "understand" | "express";
+type QuickSaveState = "idle" | "saving" | "error";
 type IconName = "home" | "listen" | "speak" | "me" | "plus" | "text" | "record" | "arrow" | "book" | "clock" | "spark" | "back" | "upload" | "check" | "lock";
 
 const glyphs: Record<IconName, string> = {
@@ -36,6 +37,10 @@ function tabFor(view: View) {
 export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Promise<void> }) {
   const [view, setView] = useState<View>("home");
   const [quickWord, setQuickWord] = useState("");
+  const [quickSaveState, setQuickSaveState] = useState<QuickSaveState>("idle");
+  const [quickSaveError, setQuickSaveError] = useState("");
+  const [quickSaveDraft, setQuickSaveDraft] = useState<VocabularyItem | null>(null);
+  const [lastSavedTerm, setLastSavedTerm] = useState("");
   const [toast, setToast] = useState("");
   const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [importPurpose, setImportPurpose] = useState<ImportPurpose>("listening");
@@ -58,12 +63,14 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [speakingAnalyzed, setSpeakingAnalyzed] = useState(false);
   const [practiceLane, setPracticeLane] = useState<PracticeLane>("today");
   const [cloudState, setCloudState] = useState<"connecting" | "synced" | "error">("connecting");
+  const [vocabularyReady, setVocabularyReady] = useState(false);
   const [learningGoal, setLearningGoal] = useState<LearningGoal>(() => createDefaultGoal());
   const [practiceEvidence, setPracticeEvidence] = useState<PracticeEvidence[]>([]);
   const [goalSaving, setGoalSaving] = useState(false);
 
   const currentCandidate = candidates[candidateIndex];
   const dueItems = useMemo(() => vocabulary.filter((item) => isVocabularyDue(item)), [vocabulary]);
+  const recentQuickWords = useMemo(() => vocabulary.filter((item) => item.source === "Quick Add").slice(0, 4), [vocabulary]);
   const activeTab = tabFor(view);
 
   useEffect(() => {
@@ -71,23 +78,41 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     let active = true;
     supabase.from("vocabulary_items").select("item_data").order("updated_at", { ascending: false }).then(async ({ data, error }) => {
       if (!active) return;
-      if (!error && data?.length) {
-        const loaded = data.map((row) => normalizeVocabularyItem(row.item_data as VocabularyItem));
-        setVocabulary(loaded);
-        const pending = loaded.filter((item) => item.enrichmentStatus === "pending" || item.definition === "Pending enrichment");
-        for (const item of pending) {
-          const enriched = normalizeVocabularyItem(await enrichVocabularyItem(item));
-          if (!active) return;
+      if (error) {
+        setCloudState("error");
+        setVocabularyReady(true);
+        return;
+      }
+      let loaded: VocabularyItem[];
+      if (data?.length) {
+        loaded = data.map((row) => normalizeVocabularyItem(row.item_data as VocabularyItem));
+      } else {
+        const seeded = seedVocabulary.map(normalizeVocabularyItem);
+        const { error: seedError } = await supabase!.from("vocabulary_items").upsert(seeded.map((item) => ({ id: item.id, user_id: user.id, item_data: item })));
+        if (!active) return;
+        if (seedError) {
+          setCloudState("error");
+          setVocabularyReady(true);
+          return;
+        }
+        loaded = seeded;
+      }
+      setVocabulary(loaded);
+      setCloudState("synced");
+      setVocabularyReady(true);
+
+      const pending = loaded.filter((item) => item.enrichmentStatus === "pending" || item.definition === "Pending enrichment");
+      for (const item of pending) {
+        const enriched = normalizeVocabularyItem(await enrichVocabularyItem(item));
+        if (!active) return;
+        const { error: enrichmentError } = await supabase!.from("vocabulary_items").upsert({ id: enriched.id, user_id: user.id, item_data: enriched, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
+        if (!active) return;
+        if (enrichmentError) {
+          setCloudState("error");
+        } else {
           setVocabulary((items) => items.map((entry) => entry.id === enriched.id ? enriched : entry));
-          await supabase!.from("vocabulary_items").upsert({ id: enriched.id, user_id: user.id, item_data: enriched, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
         }
       }
-      if (!error && !data?.length) {
-        const seeded = seedVocabulary.map(normalizeVocabularyItem);
-        setVocabulary(seeded);
-        await supabase!.from("vocabulary_items").upsert(seeded.map((item) => ({ id: item.id, user_id: user.id, item_data: item })));
-      }
-      setCloudState(error ? "error" : "synced");
     });
     return () => { active = false; };
   }, [user.id]);
@@ -130,11 +155,19 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   };
   const startImport = (purpose: ImportPurpose) => { setImportPurpose(purpose); navigate("import"); };
 
-  const saveVocabulary = async (item: VocabularyItem) => {
-    if (!supabase) return;
-    const { error } = await supabase.from("vocabulary_items").upsert({ id: item.id, user_id: user.id, item_data: item, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
-    if (error) { setCloudState("error"); flash("Saved here; cloud sync needs attention"); }
-    else setCloudState("synced");
+  const saveVocabulary = async (item: VocabularyItem, quiet = false) => {
+    if (!supabase) return false;
+    const { data, error } = await supabase.from("vocabulary_items")
+      .upsert({ id: item.id, user_id: user.id, item_data: item, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" })
+      .select("item_data")
+      .single();
+    if (error || !data) {
+      setCloudState("error");
+      if (!quiet) flash("Not saved yet · check your connection and retry");
+      return false;
+    }
+    setCloudState("synced");
+    return true;
   };
 
   const saveLearningGoal = async (goal: LearningGoal) => {
@@ -157,18 +190,43 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     }
   };
 
-  const addQuickWord = () => {
+  const addQuickWord = async () => {
     const term = quickWord.trim();
-    if (!term) return;
-    const newItem: VocabularyItem = { ...seedVocabulary[0], id: `${term.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`, term, definition: "Looking up a trusted definition…", chinese: undefined, sentence: "Quick-added during work — no original sentence captured.", context: "Saved without interrupting your workflow.", source: "Quick Add", sourceType: "work", hasOriginalContext: false, tags: ["From work"], discoveredAt: "Today", reason: "You saved this as unfamiliar during work.", explanation: "A trusted definition is being added.", newExample: "A workplace example is being added.", pronunciation: "Looking up…", enrichmentStatus: "pending", review: initialReviewPlan(), status: "Unknown", mastery: { recognition: 5, contextual: 0, listening: 0, recall: 0, activeUse: 0, pronunciation: 0 }, due: false };
-    setVocabulary((items) => [newItem, ...items]); void saveVocabulary(newItem);
-    setQuickWord(""); flash(`“${term}” saved · adding meaning and examples`);
-    void enrichVocabularyItem(newItem).then((enrichedItem) => {
-      const enriched = normalizeVocabularyItem(enrichedItem);
+    if (!term || !vocabularyReady || quickSaveState === "saving") return;
+    const existing = vocabulary.find((item) => item.term.toLowerCase() === term.toLowerCase());
+    if (existing) {
+      setQuickWord("");
+      setQuickSaveDraft(null);
+      setQuickSaveState("idle");
+      setLastSavedTerm(existing.term);
+      flash(`“${existing.term}” is already in your account`);
+      return;
+    }
+    const reusableDraft = quickSaveDraft?.term.toLowerCase() === term.toLowerCase() ? quickSaveDraft : null;
+    const newItem: VocabularyItem = reusableDraft ?? { ...seedVocabulary[0], id: `${term.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`, term, definition: "Looking up a trusted definition…", chinese: undefined, sentence: "Quick-added during work — no original sentence captured.", context: "Saved without interrupting your workflow.", source: "Quick Add", sourceType: "work", hasOriginalContext: false, tags: ["From work"], discoveredAt: "Today", reason: "You saved this as unfamiliar during work.", explanation: "A trusted definition is being added.", newExample: "A workplace example is being added.", pronunciation: "Looking up…", enrichmentStatus: "pending", review: initialReviewPlan(), status: "Unknown", mastery: { recognition: 5, contextual: 0, listening: 0, recall: 0, activeUse: 0, pronunciation: 0 }, due: false };
+    setQuickSaveDraft(newItem);
+    setQuickSaveState("saving");
+    setQuickSaveError("");
+    const confirmed = await saveVocabulary(newItem, true);
+    if (!confirmed) {
+      setQuickSaveState("error");
+      setQuickSaveError(`“${term}” was not saved. Your text is still here—tap Retry.`);
+      return;
+    }
+
+    setVocabulary((items) => [newItem, ...items.filter((item) => item.id !== newItem.id)]);
+    setQuickWord("");
+    setQuickSaveDraft(null);
+    setQuickSaveState("idle");
+    setLastSavedTerm(term);
+    flash(`“${term}” saved to your account`);
+
+    const enriched = normalizeVocabularyItem(await enrichVocabularyItem(newItem));
+    const enrichmentConfirmed = await saveVocabulary(enriched, true);
+    if (enrichmentConfirmed) {
       setVocabulary((items) => items.map((item) => item.id === enriched.id ? enriched : item));
-      void saveVocabulary(enriched);
-      flash(enriched.enrichmentStatus === "ready" ? `“${term}” is ready to learn` : `“${term}” saved · add context to verify its meaning`);
-    });
+      flash(enriched.enrichmentStatus === "ready" ? `“${term}” is ready to learn` : `“${term}” is safe · add context when ready`);
+    }
   };
 
   const runAnalysis = async () => {
@@ -233,7 +291,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   return <div className="app-shell app-v2">
     <AppHeader activeTab={activeTab} cloudState={cloudState} navigate={navigate} />
     {view === "home" && <Home navigate={navigate} dueCount={dueItems.length} newLearner={vocabulary.length <= seedVocabulary.length} />}
-    {view === "add" && <AddPage quickWord={quickWord} setQuickWord={setQuickWord} addQuickWord={addQuickWord} startImport={startImport} />}
+    {view === "add" && <AddPage quickWord={quickWord} setQuickWord={(value) => { setQuickWord(value); if (quickSaveState === "error") { setQuickSaveState("idle"); setQuickSaveError(""); } }} addQuickWord={addQuickWord} quickSaveState={quickSaveState} quickSaveError={quickSaveError} vocabularyReady={vocabularyReady} lastSavedTerm={lastSavedTerm} recentQuickWords={recentQuickWords} startImport={startImport} navigate={navigate} />}
     {view === "practice" && <PracticeHub lane={practiceLane} setLane={setPracticeLane} navigate={navigate} dueCount={dueItems.length} analyzed={speakingAnalyzed} />}
     {view === "me" && <MePage user={user} cloudState={cloudState} vocabulary={vocabulary} goal={learningGoal} practiceEvidence={practiceEvidence} goalSaving={goalSaving} saveGoal={saveLearningGoal} navigate={navigate} onSignOut={onSignOut} />}
     {view === "import" && <ImportPage purpose={importPurpose} transcript={transcript} setTranscript={setTranscript} runAnalysis={runAnalysis} loading={loading} navigate={navigate} />}
@@ -267,8 +325,27 @@ function Home({ navigate, dueCount, newLearner }: { navigate: (view: View) => vo
   return <main className="app-page home-v2"><section className="home-intro"><span className="eyebrow">WEEK 1 · BUILDING YOUR FOUNDATION</span><h1>One useful improvement today.</h1><p>Your practice is selected from the communication problems with the highest impact at work.</p></section><section className="mission-card"><div className="mission-top"><span><Icon name="speak" /></span><small>BEST NEXT STEP · 10 MIN</small></div><h2>Make your recommendation clear in the first sentence.</h2><p>You explain useful context, but coworkers sometimes have to infer what you want them to do.</p><button onClick={() => navigate("speaking-practice")}>Start focused practice <Icon name="arrow" /></button><div className="why-row"><Icon name="spark" /><span><b>Why this now</b>High communication impact · found 3 times</span></div></section>{newLearner && <section className="first-week-card"><Icon name="spark" /><div><b>Build your learner model this week</b><p>1. Add one real meeting transcript &nbsp; 2. Practice for 10 minutes &nbsp; 3. Bring in the next meeting so Encher can verify improvement.</p></div></section>}<section className="home-quick"><div className="section-heading"><h2>Bring in today’s work</h2><span>20 seconds</span></div><div className="single-action"><button onClick={() => navigate("add")}><Icon name="plus" /><span><b>Add words or meeting content</b><small>Capture what you heard or diagnose what you said</small></span><Icon name="arrow" /></button></div></section><section className="practice-pulse"><button onClick={() => navigate("today")}><span><Icon name="book" /></span><div><small>VOCABULARY READY</small><b>{dueCount} words need review</b><p>About 6 minutes</p></div><Icon name="arrow" /></button><button onClick={() => navigate("sentence")}><span><Icon name="listen" /></span><div><small>UNDERSTAND</small><b>Understand the whole idea</b><p>2 meeting sentences</p></div><Icon name="arrow" /></button></section><section className="transfer-note"><Icon name="check" /><p><b>Workplace transfer detected</b>You used “trade-off” naturally in Tuesday’s product review.</p><button onClick={() => navigate("vocabulary")}>View</button></section></main>;
 }
 
-function AddPage({ quickWord, setQuickWord, addQuickWord, startImport }: { quickWord: string; setQuickWord: (value: string) => void; addQuickWord: () => void; startImport: (purpose: ImportPurpose) => void }) {
-  return <main className="app-page add-page"><section className="tab-intro"><span className="eyebrow">CAPTURE FROM REAL WORK</span><h1>Add</h1><p>Save the moment now. Encher will turn it into the right kind of practice.</p></section><section className="capture-hub add-word-card"><span className="section-kicker">QUICK WORD OR PHRASE</span><h2>Add it before you forget it.</h2><div className="inline-save"><input value={quickWord} onChange={(event) => setQuickWord(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addQuickWord()} aria-label="Quick add a word or phrase" placeholder="e.g. walk it back" /><button disabled={!quickWord.trim()} onClick={addQuickWord}>Save</button></div><p>Definition and workplace examples can be enriched later.</p></section><section className="add-sources"><div className="section-heading"><h2>Add meeting content</h2><span>Paste text for V1</span></div><button onClick={() => startImport("listening")}><span className="add-source-icon heard"><Icon name="listen" /></span><div><b>Something I didn’t understand</b><p>Paste a coworker or meeting transcript. Find vocabulary and sentence-level meaning gaps.</p><small>Creates Vocabulary + Understand practice</small></div><Icon name="arrow" /></button><button onClick={() => startImport("speaking")}><span className="add-source-icon said"><Icon name="speak" /></span><div><b>Something I said</b><p>Paste a speaker-labeled transcript. Diagnose clarity, grammar, structure, and naturalness.</p><small>Creates Express practice</small></div><Icon name="arrow" /></button><button className="disabled-action" disabled><span className="add-source-icon"><Icon name="record" /></span><div><b>Record a meeting</b><p>Audio transcription, listening recognition, fluency, and pronunciation arrive in V2.</p><small>Audio · V2</small></div><em>SOON</em></button></section><section className="add-after"><Icon name="lock" /><div><b>Private by default</b><p>Raw meeting material stays tied to your account and separate from derived learning items.</p></div></section></main>;
+function AddPage({ quickWord, setQuickWord, addQuickWord, quickSaveState, quickSaveError, vocabularyReady, lastSavedTerm, recentQuickWords, startImport, navigate }: { quickWord: string; setQuickWord: (value: string) => void; addQuickWord: () => Promise<void>; quickSaveState: QuickSaveState; quickSaveError: string; vocabularyReady: boolean; lastSavedTerm: string; recentQuickWords: VocabularyItem[]; startImport: (purpose: ImportPurpose) => void; navigate: (view: View) => void }) {
+  const saving = quickSaveState === "saving";
+  return <main className="app-page add-page">
+    <section className="tab-intro"><span className="eyebrow">CAPTURE FROM REAL WORK</span><h1>Add</h1><p>Save the moment now. Encher will turn it into the right kind of practice.</p></section>
+    <section className="capture-hub add-word-card">
+      <span className="section-kicker">QUICK WORD OR PHRASE</span><h2>Add it before you forget it.</h2>
+      <div className="inline-save"><input value={quickWord} disabled={saving || !vocabularyReady} onChange={(event) => setQuickWord(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addQuickWord(); }} aria-label="Quick add a word or phrase" placeholder={vocabularyReady ? "e.g. walk it back" : "Opening your account memory…"} /><button disabled={!quickWord.trim() || saving || !vocabularyReady} onClick={() => void addQuickWord()}>{saving ? "Saving…" : quickSaveState === "error" ? "Retry" : "Save"}</button></div>
+      {!vocabularyReady && <div className="memory-save-status syncing" role="status"><span className="memory-spinner" /><div><b>Opening your account memory…</b><p>Add becomes available after your saved words finish loading.</p></div></div>}
+      {quickSaveState === "error" && <div className="memory-save-status error" role="alert"><span>!</span><div><b>Not saved yet</b><p>{quickSaveError}</p></div><button type="button" onClick={() => void addQuickWord()}>Retry</button></div>}
+      {lastSavedTerm && quickSaveState !== "error" && <div className="memory-save-status saved" role="status"><Icon name="check" /><div><b>Saved to your account</b><p>“{lastSavedTerm}” will still be here after you sign in again.</p></div><button type="button" onClick={() => navigate("vocabulary")}>View</button></div>}
+      <p>We only say “saved” after the account database confirms the word.</p>
+    </section>
+
+    <section className="recent-memory">
+      <div className="section-heading"><h2>Recently saved</h2><span>Account memory</span></div>
+      {recentQuickWords.length ? <div>{recentQuickWords.map((item) => <button key={item.id} type="button" onClick={() => navigate("vocabulary")}><span><b>{item.term}</b><small>{item.enrichmentStatus === "pending" ? "Saved · adding meaning…" : item.definition}</small></span><em><Icon name="check" /> Saved</em><Icon name="arrow" /></button>)}</div> : <div className="recent-memory-empty"><Icon name="book" /><span><b>No quick-added words yet</b><small>Your confirmed saves will appear here immediately.</small></span></div>}
+    </section>
+
+    <section className="add-sources"><div className="section-heading"><h2>Add meeting content</h2><span>Paste text for V1</span></div><button onClick={() => startImport("listening")}><span className="add-source-icon heard"><Icon name="listen" /></span><div><b>Something I didn’t understand</b><p>Paste a coworker or meeting transcript. Find vocabulary and sentence-level meaning gaps.</p><small>Creates Vocabulary + Understand practice</small></div><Icon name="arrow" /></button><button onClick={() => startImport("speaking")}><span className="add-source-icon said"><Icon name="speak" /></span><div><b>Something I said</b><p>Paste a speaker-labeled transcript. Diagnose clarity, grammar, structure, and naturalness.</p><small>Creates Express practice</small></div><Icon name="arrow" /></button><button className="disabled-action" disabled><span className="add-source-icon"><Icon name="record" /></span><div><b>Record a meeting</b><p>Audio transcription, listening recognition, fluency, and pronunciation arrive in V2.</p><small>Audio · V2</small></div><em>SOON</em></button></section>
+    <section className="add-after"><Icon name="lock" /><div><b>Private by default</b><p>Raw meeting material stays tied to your account and separate from derived learning items.</p></div></section>
+  </main>;
 }
 
 function PracticeHub({ lane, setLane, navigate, dueCount, analyzed }: { lane: PracticeLane; setLane: (lane: PracticeLane) => void; navigate: (view: View) => void; dueCount: number; analyzed: boolean }) {

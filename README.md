@@ -9,6 +9,7 @@ Encher turns real workplace conversations into personalized comprehension and ex
 - Installable PWA for iPhone and desktop
 - Practice tabs organized by outcome: Today / Vocabulary / Understand / Express
 - Quick Add Word with cloud persistence
+- Server-confirmed Quick Add saves with visible retry state and a recent-save receipt
 - Automatic dictionary enrichment with simple meaning, usage, collocations, and examples
 - Transcript import and candidate detection
 - Contextual vocabulary checks

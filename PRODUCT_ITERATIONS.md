@@ -44,3 +44,7 @@ Me is now a personal 12-week outcome center instead of a mixture of learner prog
 ## English composition and comparison pass
 
 Me now works like a professional capability report: it shows current workplace readiness, the 12-week target, and a “since yesterday” comparison before exposing deeper detail. A six-part skill map makes the learner’s strongest and weakest language “muscles” visible, while expandable composition rows explain every value, its evidence, its target, and the next action that can move it. Vocabulary changes are reconstructed from today’s account-backed review history and speaking changes come from today’s active correction attempts. Readiness remains distinct from plan completion, and pronunciation is deliberately marked “Not measured” until audio creates defensible evidence.
+
+## Account-memory reliability pass
+
+Quick Add no longer says “saved” based on temporary page state. It waits for the account database to return the written row, preserves the typed word when saving fails, and exposes a clear Retry action. Adding is briefly locked while the account vocabulary loads, preventing the initial cloud snapshot from overwriting a newly entered word. Recently Saved provides a visible receipt, duplicate terms are recognized, and dictionary enrichment begins only after the original word is durably stored.

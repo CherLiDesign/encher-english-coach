@@ -66,13 +66,26 @@ test("enriches quick-added words and preserves work-source provenance", async ()
     read("app/components/CoachApp.tsx"),
     read("app/lib/dictionary.ts"),
   ]);
-  assert.match(app, /adding meaning and examples/);
+  assert.match(app, /Saved · adding meaning/);
   assert.match(app, /enrichVocabularyItem\(newItem\)/);
   assert.match(dictionary, /Free Dictionary API/);
   assert.match(dictionary, /api\.dictionaryapi\.dev\/api\/v2\/entries\/en/);
   assert.match(dictionary, /From work/);
   assert.match(dictionary, /Example supplied/);
   assert.doesNotMatch(app, /definition: "Pending enrichment"/);
+});
+
+test("confirms quick-word persistence before claiming a save", async () => {
+  const app = await read("app/components/CoachApp.tsx");
+  assert.match(app, /\.upsert\([\s\S]*?\.select\("item_data"\)[\s\S]*?\.single\(\)/);
+  assert.match(app, /const confirmed = await saveVocabulary\(newItem, true\)/);
+  assert.match(app, /if \(!confirmed\)[\s\S]*?setQuickSaveState\("error"\)/);
+  assert.match(app, /Your text is still here—tap Retry/);
+  assert.match(app, /disabled=\{saving \|\| !vocabularyReady\}/);
+  assert.match(app, /Recently saved/);
+  assert.match(app, /Saved to your account/);
+  assert.match(app, /already in your account/);
+  assert.doesNotMatch(app, /Saved here; cloud sync needs attention/);
 });
 
 test("implements the professional speaking diagnosis and active correction loop", async () => {
