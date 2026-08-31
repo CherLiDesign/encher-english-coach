@@ -183,6 +183,19 @@ h1,h2,.mode-title { font-family:ui-serif,Georgia,"Times New Roman",serif; }
 .home-quick .single-action button { width:100%; }
 .add-word-card > p { margin:12px 0 0; color:var(--muted); }
 .inline-save input:disabled { color:#7b8580; background:#f1f3f1; cursor:wait; }
+.account-memory-proof { display:grid; grid-template-columns:44px minmax(0,1fr) auto; align-items:center; gap:13px; margin-bottom:16px; padding:16px; border:1px solid #c9dbd1; border-radius:18px; background:#edf4f0; }
+.memory-proof-icon { width:44px; height:44px; display:grid; place-items:center; border-radius:14px; background:var(--green); color:white; font-size:1.125rem; font-weight:850; }
+.memory-proof-icon .memory-spinner { width:22px; height:22px; border-color:rgba(255,255,255,.38); border-top-color:white; }
+.account-memory-proof small,.account-memory-proof b,.account-memory-proof p { display:block; }
+.account-memory-proof small { color:var(--green); font-weight:850; letter-spacing:.09em; }
+.account-memory-proof b { margin-top:3px; font-size:var(--type-title-medium); line-height:1.5rem; }
+.account-memory-proof p { margin:3px 0 0; color:#54645c; overflow-wrap:anywhere; }
+.account-memory-proof > button { min-height:42px; padding:0 13px; border:1px solid #acc5b7; border-radius:11px; background:white; color:var(--green); font-weight:800; cursor:pointer; }
+.account-memory-proof > button:disabled { opacity:.58; cursor:wait; }
+.account-memory-proof.error { border-color:#dec6bc; background:#f7ece7; }
+.account-memory-proof.error .memory-proof-icon { background:#a65d43; }
+.account-memory-proof.error small,.account-memory-proof.error > button { color:#8d4d38; }
+.account-memory-proof.error > button { border-color:#d8b9ad; }
 .memory-save-status { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:10px; margin-top:13px; padding:12px; border-radius:13px; background:#eef4f0; color:var(--green); }
 .memory-save-status > span:first-child { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--green); color:white; font-weight:850; }
 .memory-save-status b,.memory-save-status p { display:block; }
@@ -207,6 +220,10 @@ h1,h2,.mode-title { font-family:ui-serif,Georgia,"Times New Roman",serif; }
 .recent-memory-empty > span:first-child { width:36px; height:36px; display:grid; place-items:center; border-radius:11px; background:white; color:var(--green); }
 .recent-memory-empty b,.recent-memory-empty small { display:block; }
 .recent-memory-empty small { margin-top:3px; color:var(--muted); }
+.vocabulary-empty { max-width:620px; margin:0 auto; padding:44px 28px; border:1px solid var(--line); border-radius:20px; background:white; text-align:center; }
+.vocabulary-empty > span { width:52px; height:52px; display:grid; place-items:center; margin:0 auto 16px; border-radius:16px; background:var(--green-soft); color:var(--green); font-size:1.25rem; }
+.vocabulary-empty h2 { margin:0; }
+.vocabulary-empty p { max-width:470px; margin:9px auto 20px; color:var(--muted); }
 .add-sources { margin-top:28px; }
 .add-sources .section-heading { margin-bottom:12px; }
 .add-sources > button { width:100%; min-height:112px; display:grid; grid-template-columns:48px minmax(0,1fr) auto; align-items:center; gap:14px; margin-top:10px; padding:17px; border:1px solid var(--line); border-radius:18px; background:white; text-align:left; cursor:pointer; }
@@ -257,6 +274,9 @@ h1,h2,.mode-title { font-family:ui-serif,Georgia,"Times New Roman",serif; }
   .add-sources > button { min-height:106px; grid-template-columns:44px minmax(0,1fr) auto; gap:12px; padding:15px 13px; }
   .add-source-icon { width:44px; height:44px; border-radius:13px; }
   .add-sources > button p { margin:4px 0; }
+  .account-memory-proof { grid-template-columns:40px minmax(0,1fr); padding:14px; }
+  .memory-proof-icon { width:40px; height:40px; border-radius:12px; }
+  .account-memory-proof > button { grid-column:1/-1; width:100%; }
   .memory-save-status { grid-template-columns:32px minmax(0,1fr) auto; padding:11px; }
   .memory-save-status > span:first-child { width:32px; height:32px; }
   .recent-memory { padding:17px 14px; }

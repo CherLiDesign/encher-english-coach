@@ -77,15 +77,28 @@ test("enriches quick-added words and preserves work-source provenance", async ()
 
 test("confirms quick-word persistence before claiming a save", async () => {
   const app = await read("app/components/CoachApp.tsx");
-  assert.match(app, /\.upsert\([\s\S]*?\.select\("item_data"\)[\s\S]*?\.single\(\)/);
-  assert.match(app, /const confirmed = await saveVocabulary\(newItem, true\)/);
-  assert.match(app, /if \(!confirmed\)[\s\S]*?setQuickSaveState\("error"\)/);
+  assert.match(app, /error: writeError[\s\S]*?\.upsert\(/);
+  assert.match(app, /data: readBack[\s\S]*?\.select\("item_data"\)[\s\S]*?\.eq\("user_id", user\.id\)[\s\S]*?\.eq\("id", item\.id\)[\s\S]*?\.single\(\)/);
+  assert.match(app, /const confirmedItem = await saveVocabulary\(newItem, true\)/);
+  assert.match(app, /if \(!confirmedItem\)[\s\S]*?setQuickSaveState\("error"\)/);
   assert.match(app, /Your text is still here—tap Retry/);
-  assert.match(app, /disabled=\{saving \|\| !vocabularyReady\}/);
+  assert.match(app, /disabled=\{saving \|\| !memoryReady\}/);
   assert.match(app, /Recently saved/);
-  assert.match(app, /Saved to your account/);
+  assert.match(app, /Saved and read back/);
+  assert.match(app, /Verify now/);
+  assert.match(app, /personal.*words.*verified/);
   assert.match(app, /already in your account/);
   assert.doesNotMatch(app, /Saved here; cloud sync needs attention/);
+});
+
+test("never presents system samples as personal account memory", async () => {
+  const app = await read("app/components/CoachApp.tsx");
+  assert.match(app, /useState<VocabularyItem\[\]>\(\[\]\)/);
+  assert.match(app, /filter\(\(item\) => !isLegacyDemoItem\(item\)\)/);
+  assert.match(app, /Your personal words are not replaced with samples/);
+  assert.match(app, /Example words are never shown as your memory/);
+  assert.doesNotMatch(app, /setVocabulary\(seeded\)/);
+  assert.doesNotMatch(app, /const seeded = seedVocabulary/);
 });
 
 test("implements the professional speaking diagnosis and active correction loop", async () => {
@@ -162,7 +175,7 @@ test("is installable as a standalone PWA", async () => {
   assert.equal(manifest.short_name, "Encher");
   assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512"));
-  assert.match(serviceWorker, /encher-shell-v2/);
+  assert.match(serviceWorker, /encher-shell-v3/);
   assert.match(entry, /apple-mobile-web-app-capable/);
   await access(new URL("public/icon-192.png", root));
   await access(new URL("public/icon-512.png", root));

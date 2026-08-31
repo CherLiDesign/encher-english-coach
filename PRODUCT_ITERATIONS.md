@@ -48,3 +48,7 @@ Me now works like a professional capability report: it shows current workplace r
 ## Account-memory reliability pass
 
 Quick Add no longer says “saved” based on temporary page state. It waits for the account database to return the written row, preserves the typed word when saving fails, and exposes a clear Retry action. Adding is briefly locked while the account vocabulary loads, preventing the initial cloud snapshot from overwriting a newly entered word. Recently Saved provides a visible receipt, duplicate terms are recognized, and dictionary enrichment begins only after the original word is durably stored.
+
+## Verifiable memory pass
+
+The three launch-readiness demo words are no longer initialized, auto-written, or displayed as personal vocabulary. An account starts with only the records actually read from its private database; a failed read shows a blocking error instead of sample data. Every vocabulary write is followed by a separate account-scoped read-back, and the Add screen now shows the signed-in email, verified personal-word count, verification time, and a manual Verify now action. The empty vocabulary page explicitly distinguishes real personal memory from examples.

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { analyzeTranscript, evaluateAnswer, SAMPLE_TRANSCRIPT, seedVocabulary } from "../lib/mock-ai";
+import { analyzeTranscript, evaluateAnswer, SAMPLE_TRANSCRIPT } from "../lib/mock-ai";
 import { enrichVocabularyItem } from "../lib/dictionary";
 import { calculateEnglishProfile } from "../lib/english-profile";
 import type { PracticeEvidence } from "../lib/english-profile";
@@ -15,6 +15,7 @@ import type { Candidate, LearningGoal, View, VocabularyEvaluation, VocabularyIte
 type ImportPurpose = "listening" | "speaking";
 type PracticeLane = "today" | "vocabulary" | "understand" | "express";
 type QuickSaveState = "idle" | "saving" | "error";
+type MemoryLoadState = "loading" | "ready" | "error";
 type IconName = "home" | "listen" | "speak" | "me" | "plus" | "text" | "record" | "arrow" | "book" | "clock" | "spark" | "back" | "upload" | "check" | "lock";
 
 const glyphs: Record<IconName, string> = {
@@ -34,6 +35,38 @@ function tabFor(view: View) {
   return "home";
 }
 
+const legacyDemoIds = new Set(["workaround", "hold-off", "contingency"]);
+
+function isLegacyDemoItem(item: VocabularyItem) {
+  return legacyDemoIds.has(item.id)
+    && item.source === "Launch Readiness Sync"
+    && item.discoveredAt === "Aug 20, 2026";
+}
+
+function createQuickVocabularyItem(term: string): VocabularyItem {
+  return {
+    id: `${term.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "word"}-${Date.now()}`,
+    term,
+    definition: "Looking up a trusted definition…",
+    sentence: "Quick-added during work — no original sentence captured.",
+    context: "Saved without interrupting your workflow.",
+    source: "Quick Add",
+    sourceType: "work",
+    hasOriginalContext: false,
+    tags: ["From work"],
+    discoveredAt: "Today",
+    reason: "You saved this as unfamiliar during work.",
+    explanation: "A trusted definition is being added.",
+    newExample: "A workplace example is being added.",
+    pronunciation: "Looking up…",
+    enrichmentStatus: "pending",
+    review: initialReviewPlan(),
+    status: "Unknown",
+    mastery: { recognition: 5, contextual: 0, listening: 0, recall: 0, activeUse: 0, pronunciation: 0 },
+    due: false,
+  };
+}
+
 export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Promise<void> }) {
   const [view, setView] = useState<View>("home");
   const [quickWord, setQuickWord] = useState("");
@@ -45,7 +78,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [transcript, setTranscript] = useState(SAMPLE_TRANSCRIPT);
   const [importPurpose, setImportPurpose] = useState<ImportPurpose>("listening");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>(seedVocabulary.map(normalizeVocabularyItem));
+  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [answerMode, setAnswerMode] = useState<"choice" | "explain" | "result">("choice");
@@ -63,7 +96,9 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   const [speakingAnalyzed, setSpeakingAnalyzed] = useState(false);
   const [practiceLane, setPracticeLane] = useState<PracticeLane>("today");
   const [cloudState, setCloudState] = useState<"connecting" | "synced" | "error">("connecting");
-  const [vocabularyReady, setVocabularyReady] = useState(false);
+  const [memoryLoadState, setMemoryLoadState] = useState<MemoryLoadState>("loading");
+  const [memoryVerifiedAt, setMemoryVerifiedAt] = useState<string | null>(null);
+  const [memoryReloadToken, setMemoryReloadToken] = useState(0);
   const [learningGoal, setLearningGoal] = useState<LearningGoal>(() => createDefaultGoal());
   const [practiceEvidence, setPracticeEvidence] = useState<PracticeEvidence[]>([]);
   const [goalSaving, setGoalSaving] = useState(false);
@@ -76,30 +111,20 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   useEffect(() => {
     if (!supabase) return;
     let active = true;
-    supabase.from("vocabulary_items").select("item_data").order("updated_at", { ascending: false }).then(async ({ data, error }) => {
+    supabase.from("vocabulary_items").select("item_data").eq("user_id", user.id).order("updated_at", { ascending: false }).then(async ({ data, error }) => {
       if (!active) return;
       if (error) {
         setCloudState("error");
-        setVocabularyReady(true);
+        setMemoryLoadState("error");
         return;
       }
-      let loaded: VocabularyItem[];
-      if (data?.length) {
-        loaded = data.map((row) => normalizeVocabularyItem(row.item_data as VocabularyItem));
-      } else {
-        const seeded = seedVocabulary.map(normalizeVocabularyItem);
-        const { error: seedError } = await supabase!.from("vocabulary_items").upsert(seeded.map((item) => ({ id: item.id, user_id: user.id, item_data: item })));
-        if (!active) return;
-        if (seedError) {
-          setCloudState("error");
-          setVocabularyReady(true);
-          return;
-        }
-        loaded = seeded;
-      }
+      const loaded = (data ?? [])
+        .map((row) => normalizeVocabularyItem(row.item_data as VocabularyItem))
+        .filter((item) => !isLegacyDemoItem(item));
       setVocabulary(loaded);
       setCloudState("synced");
-      setVocabularyReady(true);
+      setMemoryLoadState("ready");
+      setMemoryVerifiedAt(new Date().toISOString());
 
       const pending = loaded.filter((item) => item.enrichmentStatus === "pending" || item.definition === "Pending enrichment");
       for (const item of pending) {
@@ -115,7 +140,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
       }
     });
     return () => { active = false; };
-  }, [user.id]);
+  }, [user.id, memoryReloadToken]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -155,19 +180,36 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   };
   const startImport = (purpose: ImportPurpose) => { setImportPurpose(purpose); navigate("import"); };
 
+  const verifyAccountMemory = () => {
+    if (memoryLoadState === "loading") return;
+    setMemoryLoadState("loading");
+    setCloudState("connecting");
+    setMemoryReloadToken((token) => token + 1);
+  };
+
   const saveVocabulary = async (item: VocabularyItem, quiet = false) => {
-    if (!supabase) return false;
-    const { data, error } = await supabase.from("vocabulary_items")
-      .upsert({ id: item.id, user_id: user.id, item_data: item, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" })
-      .select("item_data")
-      .single();
-    if (error || !data) {
+    if (!supabase) return null;
+    const { error: writeError } = await supabase.from("vocabulary_items")
+      .upsert({ id: item.id, user_id: user.id, item_data: item, updated_at: new Date().toISOString() }, { onConflict: "user_id,id" });
+    if (writeError) {
       setCloudState("error");
       if (!quiet) flash("Not saved yet · check your connection and retry");
-      return false;
+      return null;
+    }
+    const { data: readBack, error: readError } = await supabase.from("vocabulary_items")
+      .select("item_data")
+      .eq("user_id", user.id)
+      .eq("id", item.id)
+      .single();
+    const confirmed = readBack ? normalizeVocabularyItem(readBack.item_data as VocabularyItem) : null;
+    if (readError || !confirmed || confirmed.id !== item.id || confirmed.term !== item.term) {
+      setCloudState("error");
+      if (!quiet) flash("Not verified yet · check your connection and retry");
+      return null;
     }
     setCloudState("synced");
-    return true;
+    setMemoryVerifiedAt(new Date().toISOString());
+    return confirmed;
   };
 
   const saveLearningGoal = async (goal: LearningGoal) => {
@@ -192,29 +234,29 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
 
   const addQuickWord = async () => {
     const term = quickWord.trim();
-    if (!term || !vocabularyReady || quickSaveState === "saving") return;
+    if (!term || memoryLoadState !== "ready" || quickSaveState === "saving") return;
     const existing = vocabulary.find((item) => item.term.toLowerCase() === term.toLowerCase());
     if (existing) {
       setQuickWord("");
       setQuickSaveDraft(null);
       setQuickSaveState("idle");
-      setLastSavedTerm(existing.term);
+      setLastSavedTerm("");
       flash(`“${existing.term}” is already in your account`);
       return;
     }
     const reusableDraft = quickSaveDraft?.term.toLowerCase() === term.toLowerCase() ? quickSaveDraft : null;
-    const newItem: VocabularyItem = reusableDraft ?? { ...seedVocabulary[0], id: `${term.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`, term, definition: "Looking up a trusted definition…", chinese: undefined, sentence: "Quick-added during work — no original sentence captured.", context: "Saved without interrupting your workflow.", source: "Quick Add", sourceType: "work", hasOriginalContext: false, tags: ["From work"], discoveredAt: "Today", reason: "You saved this as unfamiliar during work.", explanation: "A trusted definition is being added.", newExample: "A workplace example is being added.", pronunciation: "Looking up…", enrichmentStatus: "pending", review: initialReviewPlan(), status: "Unknown", mastery: { recognition: 5, contextual: 0, listening: 0, recall: 0, activeUse: 0, pronunciation: 0 }, due: false };
+    const newItem = reusableDraft ?? createQuickVocabularyItem(term);
     setQuickSaveDraft(newItem);
     setQuickSaveState("saving");
     setQuickSaveError("");
-    const confirmed = await saveVocabulary(newItem, true);
-    if (!confirmed) {
+    const confirmedItem = await saveVocabulary(newItem, true);
+    if (!confirmedItem) {
       setQuickSaveState("error");
       setQuickSaveError(`“${term}” was not saved. Your text is still here—tap Retry.`);
       return;
     }
 
-    setVocabulary((items) => [newItem, ...items.filter((item) => item.id !== newItem.id)]);
+    setVocabulary((items) => [confirmedItem, ...items.filter((item) => item.id !== confirmedItem.id)]);
     setQuickWord("");
     setQuickSaveDraft(null);
     setQuickSaveState("idle");
@@ -224,7 +266,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     const enriched = normalizeVocabularyItem(await enrichVocabularyItem(newItem));
     const enrichmentConfirmed = await saveVocabulary(enriched, true);
     if (enrichmentConfirmed) {
-      setVocabulary((items) => items.map((item) => item.id === enriched.id ? enriched : item));
+      setVocabulary((items) => items.map((item) => item.id === enrichmentConfirmed.id ? enrichmentConfirmed : item));
       flash(enriched.enrichmentStatus === "ready" ? `“${term}” is ready to learn` : `“${term}” is safe · add context when ready`);
     }
   };
@@ -243,28 +285,38 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
 
   const chooseKnowledge = (rating: string) => {
     setSelfRating(rating);
-    if (rating === "I don’t know it") { setResult("Unknown"); setAnswerMode("result"); addCandidate(currentCandidate, "Unknown"); }
+    if (rating === "I don’t know it") { setResult("Unknown"); setAnswerMode("result"); void addCandidate(currentCandidate, "Unknown"); }
     else setAnswerMode("explain");
   };
-  const addCandidate = (item: Candidate, status = "Learning") => {
+  const addCandidate = async (item: Candidate, status = "Learning") => {
     const saved = normalizeVocabularyItem({ ...item, sourceType: "work", hasOriginalContext: true, tags: ["From work"], enrichmentStatus: "ready", review: initialReviewPlan(), status: status as VocabularyItem["status"] });
-    setVocabulary((items) => items.some((entry) => entry.id === item.id) ? items : [saved, ...items]); void saveVocabulary(saved);
+    const confirmed = await saveVocabulary(saved, true);
+    if (!confirmed) {
+      flash(`“${item.term}” was not added · retry when account memory reconnects`);
+      return;
+    }
+    setVocabulary((items) => items.some((entry) => entry.id === item.id) ? items : [confirmed, ...items]);
   };
-  const submitAnswer = () => { const evaluation = evaluateAnswer(answer, currentCandidate); setResult(evaluation); setAnswerMode("result"); if (evaluation !== "Correct") addCandidate(currentCandidate); };
+  const submitAnswer = () => { const evaluation = evaluateAnswer(answer, currentCandidate); setResult(evaluation); setAnswerMode("result"); if (evaluation !== "Correct") void addCandidate(currentCandidate); };
   const nextCandidate = () => {
     if (candidateIndex < candidates.length - 1) { setCandidateIndex((index) => index + 1); setAnswerMode("choice"); setAnswer(""); setResult(""); setSelfRating(""); }
     else { navigate("vocabulary"); flash("Candidate check complete"); }
   };
 
-  const completeVocabularyReview = (evaluation: VocabularyEvaluation, promptType: VocabularyReviewAttempt["promptType"]) => {
+  const completeVocabularyReview = async (evaluation: VocabularyEvaluation, promptType: VocabularyReviewAttempt["promptType"]) => {
     const item = practiceQueue[practiceIndex];
     if (item) {
       const updated = applyVocabularyReview(item, practiceAnswer, evaluation, promptType);
-      setVocabulary((all) => all.map((entry) => entry.id === updated.id ? updated : entry)); void saveVocabulary(updated);
+      const confirmed = await saveVocabulary(updated, true);
+      if (!confirmed) {
+        flash("Review not saved · reconnect and tap Continue again");
+        return;
+      }
+      setVocabulary((all) => all.map((entry) => entry.id === confirmed.id ? confirmed : entry));
       const alreadyQueuedAgain = practiceQueue.slice(practiceIndex + 1).some((entry) => entry.id === item.id);
       const timesShown = practiceQueue.slice(0, practiceIndex + 1).filter((entry) => entry.id === item.id).length;
       const repeatThisSession = (evaluation === "incorrect" || evaluation === "unknown") && !alreadyQueuedAgain && timesShown === 1 && practiceQueue.length < 8;
-      if (repeatThisSession) setPracticeQueue((queue) => [...queue, updated]);
+      if (repeatThisSession) setPracticeQueue((queue) => [...queue, confirmed]);
       const finalLength = practiceQueue.length + (repeatThisSession ? 1 : 0);
       if (practiceIndex >= finalLength - 1) {
         setPracticeComplete(true);
@@ -290,8 +342,8 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
 
   return <div className="app-shell app-v2">
     <AppHeader activeTab={activeTab} cloudState={cloudState} navigate={navigate} />
-    {view === "home" && <Home navigate={navigate} dueCount={dueItems.length} newLearner={vocabulary.length <= seedVocabulary.length} />}
-    {view === "add" && <AddPage quickWord={quickWord} setQuickWord={(value) => { setQuickWord(value); if (quickSaveState === "error") { setQuickSaveState("idle"); setQuickSaveError(""); } }} addQuickWord={addQuickWord} quickSaveState={quickSaveState} quickSaveError={quickSaveError} vocabularyReady={vocabularyReady} lastSavedTerm={lastSavedTerm} recentQuickWords={recentQuickWords} startImport={startImport} navigate={navigate} />}
+    {view === "home" && <Home navigate={navigate} dueCount={dueItems.length} newLearner={vocabulary.length === 0} />}
+    {view === "add" && <AddPage quickWord={quickWord} setQuickWord={(value) => { setQuickWord(value); if (quickSaveState === "error") { setQuickSaveState("idle"); setQuickSaveError(""); } }} addQuickWord={addQuickWord} quickSaveState={quickSaveState} quickSaveError={quickSaveError} memoryLoadState={memoryLoadState} memoryVerifiedAt={memoryVerifiedAt} accountEmail={user.email ?? "Signed-in account"} personalWordCount={vocabulary.length} verifyAccountMemory={verifyAccountMemory} lastSavedTerm={lastSavedTerm} recentQuickWords={recentQuickWords} startImport={startImport} navigate={navigate} />}
     {view === "practice" && <PracticeHub lane={practiceLane} setLane={setPracticeLane} navigate={navigate} dueCount={dueItems.length} analyzed={speakingAnalyzed} />}
     {view === "me" && <MePage user={user} cloudState={cloudState} vocabulary={vocabulary} goal={learningGoal} practiceEvidence={practiceEvidence} goalSaving={goalSaving} saveGoal={saveLearningGoal} navigate={navigate} onSignOut={onSignOut} />}
     {view === "import" && <ImportPage purpose={importPurpose} transcript={transcript} setTranscript={setTranscript} runAnalysis={runAnalysis} loading={loading} navigate={navigate} />}
@@ -325,17 +377,25 @@ function Home({ navigate, dueCount, newLearner }: { navigate: (view: View) => vo
   return <main className="app-page home-v2"><section className="home-intro"><span className="eyebrow">WEEK 1 · BUILDING YOUR FOUNDATION</span><h1>One useful improvement today.</h1><p>Your practice is selected from the communication problems with the highest impact at work.</p></section><section className="mission-card"><div className="mission-top"><span><Icon name="speak" /></span><small>BEST NEXT STEP · 10 MIN</small></div><h2>Make your recommendation clear in the first sentence.</h2><p>You explain useful context, but coworkers sometimes have to infer what you want them to do.</p><button onClick={() => navigate("speaking-practice")}>Start focused practice <Icon name="arrow" /></button><div className="why-row"><Icon name="spark" /><span><b>Why this now</b>High communication impact · found 3 times</span></div></section>{newLearner && <section className="first-week-card"><Icon name="spark" /><div><b>Build your learner model this week</b><p>1. Add one real meeting transcript &nbsp; 2. Practice for 10 minutes &nbsp; 3. Bring in the next meeting so Encher can verify improvement.</p></div></section>}<section className="home-quick"><div className="section-heading"><h2>Bring in today’s work</h2><span>20 seconds</span></div><div className="single-action"><button onClick={() => navigate("add")}><Icon name="plus" /><span><b>Add words or meeting content</b><small>Capture what you heard or diagnose what you said</small></span><Icon name="arrow" /></button></div></section><section className="practice-pulse"><button onClick={() => navigate("today")}><span><Icon name="book" /></span><div><small>VOCABULARY READY</small><b>{dueCount} words need review</b><p>About 6 minutes</p></div><Icon name="arrow" /></button><button onClick={() => navigate("sentence")}><span><Icon name="listen" /></span><div><small>UNDERSTAND</small><b>Understand the whole idea</b><p>2 meeting sentences</p></div><Icon name="arrow" /></button></section><section className="transfer-note"><Icon name="check" /><p><b>Workplace transfer detected</b>You used “trade-off” naturally in Tuesday’s product review.</p><button onClick={() => navigate("vocabulary")}>View</button></section></main>;
 }
 
-function AddPage({ quickWord, setQuickWord, addQuickWord, quickSaveState, quickSaveError, vocabularyReady, lastSavedTerm, recentQuickWords, startImport, navigate }: { quickWord: string; setQuickWord: (value: string) => void; addQuickWord: () => Promise<void>; quickSaveState: QuickSaveState; quickSaveError: string; vocabularyReady: boolean; lastSavedTerm: string; recentQuickWords: VocabularyItem[]; startImport: (purpose: ImportPurpose) => void; navigate: (view: View) => void }) {
+function AddPage({ quickWord, setQuickWord, addQuickWord, quickSaveState, quickSaveError, memoryLoadState, memoryVerifiedAt, accountEmail, personalWordCount, verifyAccountMemory, lastSavedTerm, recentQuickWords, startImport, navigate }: { quickWord: string; setQuickWord: (value: string) => void; addQuickWord: () => Promise<void>; quickSaveState: QuickSaveState; quickSaveError: string; memoryLoadState: MemoryLoadState; memoryVerifiedAt: string | null; accountEmail: string; personalWordCount: number; verifyAccountMemory: () => void; lastSavedTerm: string; recentQuickWords: VocabularyItem[]; startImport: (purpose: ImportPurpose) => void; navigate: (view: View) => void }) {
   const saving = quickSaveState === "saving";
+  const memoryReady = memoryLoadState === "ready";
+  const verificationTime = memoryVerifiedAt ? new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(new Date(memoryVerifiedAt)) : "Not verified";
   return <main className="app-page add-page">
     <section className="tab-intro"><span className="eyebrow">CAPTURE FROM REAL WORK</span><h1>Add</h1><p>Save the moment now. Encher will turn it into the right kind of practice.</p></section>
+    <section className={`account-memory-proof ${memoryLoadState}`} aria-live="polite">
+      <span className="memory-proof-icon">{memoryLoadState === "loading" ? <span className="memory-spinner" /> : memoryLoadState === "ready" ? <Icon name="check" /> : "!"}</span>
+      <div><small>YOUR ACCOUNT MEMORY</small><b>{memoryLoadState === "loading" ? "Checking your private cloud memory…" : memoryLoadState === "error" ? "Could not verify account memory" : `${personalWordCount} personal ${personalWordCount === 1 ? "word" : "words"} verified`}</b><p>{memoryLoadState === "error" ? "Your personal words are not replaced with samples. Reconnect and verify again." : `${accountEmail} · ${memoryLoadState === "ready" ? `read from cloud at ${verificationTime}` : "checking now"}`}</p></div>
+      <button type="button" disabled={memoryLoadState === "loading"} onClick={verifyAccountMemory}>{memoryLoadState === "loading" ? "Checking…" : memoryLoadState === "error" ? "Retry" : "Verify now"}</button>
+    </section>
     <section className="capture-hub add-word-card">
       <span className="section-kicker">QUICK WORD OR PHRASE</span><h2>Add it before you forget it.</h2>
-      <div className="inline-save"><input value={quickWord} disabled={saving || !vocabularyReady} onChange={(event) => setQuickWord(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addQuickWord(); }} aria-label="Quick add a word or phrase" placeholder={vocabularyReady ? "e.g. walk it back" : "Opening your account memory…"} /><button disabled={!quickWord.trim() || saving || !vocabularyReady} onClick={() => void addQuickWord()}>{saving ? "Saving…" : quickSaveState === "error" ? "Retry" : "Save"}</button></div>
-      {!vocabularyReady && <div className="memory-save-status syncing" role="status"><span className="memory-spinner" /><div><b>Opening your account memory…</b><p>Add becomes available after your saved words finish loading.</p></div></div>}
+      <div className="inline-save"><input value={quickWord} disabled={saving || !memoryReady} onChange={(event) => setQuickWord(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addQuickWord(); }} aria-label="Quick add a word or phrase" placeholder={memoryReady ? "e.g. walk it back" : memoryLoadState === "error" ? "Reconnect to save safely" : "Opening your account memory…"} /><button disabled={!quickWord.trim() || saving || !memoryReady} onClick={() => void addQuickWord()}>{saving ? "Saving…" : quickSaveState === "error" ? "Retry" : "Save"}</button></div>
+      {memoryLoadState === "loading" && <div className="memory-save-status syncing" role="status"><span className="memory-spinner" /><div><b>Opening your account memory…</b><p>Add becomes available after your saved words finish loading.</p></div></div>}
+      {memoryLoadState === "error" && <div className="memory-save-status error" role="alert"><span>!</span><div><b>Memory unavailable</b><p>Nothing new can be saved until your account database is verified.</p></div><button type="button" onClick={verifyAccountMemory}>Retry</button></div>}
       {quickSaveState === "error" && <div className="memory-save-status error" role="alert"><span>!</span><div><b>Not saved yet</b><p>{quickSaveError}</p></div><button type="button" onClick={() => void addQuickWord()}>Retry</button></div>}
-      {lastSavedTerm && quickSaveState !== "error" && <div className="memory-save-status saved" role="status"><Icon name="check" /><div><b>Saved to your account</b><p>“{lastSavedTerm}” will still be here after you sign in again.</p></div><button type="button" onClick={() => navigate("vocabulary")}>View</button></div>}
-      <p>We only say “saved” after the account database confirms the word.</p>
+      {lastSavedTerm && quickSaveState !== "error" && <div className="memory-save-status saved" role="status"><Icon name="check" /><div><b>Saved and read back</b><p>“{lastSavedTerm}” was written to {accountEmail}, then independently read back.</p></div><button type="button" onClick={() => navigate("vocabulary")}>View</button></div>}
+      <p>“Saved” means Encher wrote the word, then independently read the same word back from your private account.</p>
     </section>
 
     <section className="recent-memory">
@@ -476,6 +536,7 @@ function VocabularyPage({ items, navigate }: { items: VocabularyItem[]; navigate
   const [selectedId, setSelectedId] = useState(items[0]?.id ?? "");
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
   const reviewLabel = selected?.review ? (selected.review.intervalDays === 0 ? "Due now" : new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(selected.review.dueAt))) : "Due now";
+  if (!selected) return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Only words saved to your signed-in account appear here." onBack={() => navigate("practice")} /><section className="vocabulary-empty"><Icon name="book" /><h2>No personal words saved yet.</h2><p>Example words are never shown as your memory. Add one real word and Encher will verify it against your private account before it appears here.</p><button className="solid-button" onClick={() => navigate("add")}>Add my first word</button></section></main>;
   return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Meaning, real context, and a review plan for every word." onBack={() => navigate("practice")} /><div className="library-layout"><section className="vocab-list"><div className="list-toolbar"><span>{items.length} items</span><button onClick={() => navigate("today")}>Review due</button></div>{items.map((item) => <button key={item.id} className={selected?.id === item.id ? "selected" : ""} onClick={() => setSelectedId(item.id)}><span><b>{item.term}</b><small>{item.definition}</small></span><em>{item.enrichmentStatus === "pending" ? "Adding meaning…" : item.status}</em></button>)}</section>{selected && <section className="vocab-detail"><div className="detail-top"><div><div className="vocab-tags"><span className="status-pill">{selected.status}</span>{selected.tags?.map((tag) => <span key={tag} className="source-tag">{tag}</span>)}</div><h2>{selected.term}</h2><p className="pronunciation">{selected.pronunciation} {selected.partOfSpeech && <em>{selected.partOfSpeech}</em>} <button aria-label="Audio pronunciation arrives in V2" disabled>▶</button></p></div><ProgressRing value={Math.round(Object.values(selected.mastery).reduce((a, b) => a + b, 0) / 6)} /></div><p className="definition">{selected.definition}</p>{selected.chinese && <p className="chinese">{selected.chinese}</p>}{selected.usageNote && <div className="dictionary-usage"><b>How to use it</b><p>{selected.usageNote}</p>{selected.collocations?.length ? <small>Common: {selected.collocations.join(" · ")}</small> : null}</div>}<div className="origin"><small>{selected.hasOriginalContext ? `WHERE YOU FOUND IT · ${selected.source}` : "SUPPLIED EXAMPLE · ORIGINAL WORK SENTENCE NOT CAPTURED"}</small><blockquote>“{selected.sentence}”</blockquote><p>{selected.context}</p></div><div className="review-plan-card"><div><Icon name="clock" /><span><small>NEXT REVIEW</small><b>{reviewLabel}</b></span></div><div><span><small>CURRENT INTERVAL</small><b>{selected.review?.intervalDays ? `${selected.review.intervalDays} days` : "New"}</b></span><span><small>LAST RESULT</small><b>{selected.review?.lastResult?.replace("partial", "Partly correct") ?? "Not reviewed"}</b></span></div><p>Correct answers increase the interval. Incorrect answers return in the same session and again tomorrow.</p></div><h3>Mastery profile</h3><div className="mastery-grid">{Object.entries(selected.mastery).map(([key, value]) => <div key={key}><span><b>{key.replace(/([A-Z])/g, " $1")}</b><em>{value}%</em></span><i><span style={{ width: `${value}%` }} /></i></div>)}</div><div className="coach-note"><Icon name="spark" /><p><b>Why this is here</b>{selected.reason}</p></div></section>}</div></main>;
 }
 
