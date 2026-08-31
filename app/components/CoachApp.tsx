@@ -43,10 +43,69 @@ function isLegacyDemoItem(item: VocabularyItem) {
     && item.discoveredAt === "Aug 20, 2026";
 }
 
+function vocabularyTermKey(term: string) {
+  return term.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+}
+
+function sameVocabularyTerm(first: string, second: string) {
+  return vocabularyTermKey(first) === vocabularyTermKey(second);
+}
+
+function vocabularyEvidenceScore(item: VocabularyItem) {
+  const masteryEvidence = Object.values(item.mastery).reduce((total, value) => total + value, 0);
+  const reviewEvidence = item.review?.history.length ?? 0;
+  const hasRealDefinition = item.definition && !item.definition.toLowerCase().includes("looking up");
+  return masteryEvidence
+    + reviewEvidence * 25
+    + (item.enrichmentStatus === "ready" ? 60 : 0)
+    + (item.hasOriginalContext ? 50 : 0)
+    + (hasRealDefinition ? 40 : 0);
+}
+
+function mergeVocabularyItems(first: VocabularyItem, second: VocabularyItem): VocabularyItem {
+  const preferred = vocabularyEvidenceScore(second) > vocabularyEvidenceScore(first) ? second : first;
+  const fallback = preferred === first ? second : first;
+  const reviewCandidates = [first.review, second.review].filter((review) => review !== undefined);
+  const preferredReview = reviewCandidates.sort((left, right) => {
+    const leftDate = left.lastReviewedAt ?? left.history[0]?.attemptedAt ?? left.dueAt;
+    const rightDate = right.lastReviewedAt ?? right.history[0]?.attemptedAt ?? right.dueAt;
+    return new Date(rightDate).getTime() - new Date(leftDate).getTime();
+  })[0] ?? initialReviewPlan();
+  const reviewHistory = [...(first.review?.history ?? []), ...(second.review?.history ?? [])]
+    .filter((attempt, index, attempts) => attempts.findIndex((candidate) => candidate.id === attempt.id) === index)
+    .sort((left, right) => new Date(right.attemptedAt).getTime() - new Date(left.attemptedAt).getTime())
+    .slice(0, 30);
+
+  return normalizeVocabularyItem({
+    ...fallback,
+    ...preferred,
+    id: first.id,
+    term: preferred.term.trim().replace(/\s+/g, " "),
+    tags: [...new Set([...(first.tags ?? []), ...(second.tags ?? [])])],
+    hasOriginalContext: Boolean(first.hasOriginalContext || second.hasOriginalContext),
+    mastery: Object.fromEntries(Object.keys(first.mastery).map((key) => [
+      key,
+      Math.max(first.mastery[key as keyof typeof first.mastery], second.mastery[key as keyof typeof second.mastery]),
+    ])) as VocabularyItem["mastery"],
+    review: { ...preferredReview, history: reviewHistory },
+  });
+}
+
+function dedupeVocabularyItems(items: VocabularyItem[]) {
+  const uniqueItems = new Map<string, VocabularyItem>();
+  for (const item of items) {
+    const key = vocabularyTermKey(item.term);
+    const existing = uniqueItems.get(key);
+    uniqueItems.set(key, existing ? mergeVocabularyItems(existing, item) : item);
+  }
+  return [...uniqueItems.values()];
+}
+
 function createQuickVocabularyItem(term: string): VocabularyItem {
+  const normalizedTerm = term.trim().replace(/\s+/g, " ");
   return {
-    id: `${term.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "word"}-${Date.now()}`,
-    term,
+    id: `quick-${encodeURIComponent(vocabularyTermKey(normalizedTerm))}`,
+    term: normalizedTerm,
     definition: "Looking up a trusted definition…",
     sentence: "Quick-added during work — no original sentence captured.",
     context: "Saved without interrupting your workflow.",
@@ -118,9 +177,9 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
         setMemoryLoadState("error");
         return;
       }
-      const loaded = (data ?? [])
+      const loaded = dedupeVocabularyItems((data ?? [])
         .map((row) => normalizeVocabularyItem(row.item_data as VocabularyItem))
-        .filter((item) => !isLegacyDemoItem(item));
+        .filter((item) => !isLegacyDemoItem(item)));
       setVocabulary(loaded);
       setCloudState("synced");
       setMemoryLoadState("ready");
@@ -135,7 +194,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
         if (enrichmentError) {
           setCloudState("error");
         } else {
-          setVocabulary((items) => items.map((entry) => entry.id === enriched.id ? enriched : entry));
+          setVocabulary((items) => dedupeVocabularyItems(items.map((entry) => entry.id === enriched.id ? enriched : entry)));
         }
       }
     });
@@ -233,9 +292,9 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   };
 
   const addQuickWord = async () => {
-    const term = quickWord.trim();
+    const term = quickWord.trim().replace(/\s+/g, " ");
     if (!term || memoryLoadState !== "ready" || quickSaveState === "saving") return;
-    const existing = vocabulary.find((item) => item.term.toLowerCase() === term.toLowerCase());
+    const existing = vocabulary.find((item) => sameVocabularyTerm(item.term, term));
     if (existing) {
       setQuickWord("");
       setQuickSaveDraft(null);
@@ -244,7 +303,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
       flash(`“${existing.term}” is already in your account`);
       return;
     }
-    const reusableDraft = quickSaveDraft?.term.toLowerCase() === term.toLowerCase() ? quickSaveDraft : null;
+    const reusableDraft = quickSaveDraft && sameVocabularyTerm(quickSaveDraft.term, term) ? quickSaveDraft : null;
     const newItem = reusableDraft ?? createQuickVocabularyItem(term);
     setQuickSaveDraft(newItem);
     setQuickSaveState("saving");
@@ -256,7 +315,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
       return;
     }
 
-    setVocabulary((items) => [confirmedItem, ...items.filter((item) => item.id !== confirmedItem.id)]);
+    setVocabulary((items) => dedupeVocabularyItems([confirmedItem, ...items.filter((item) => item.id !== confirmedItem.id)]));
     setQuickWord("");
     setQuickSaveDraft(null);
     setQuickSaveState("idle");
@@ -266,7 +325,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
     const enriched = normalizeVocabularyItem(await enrichVocabularyItem(newItem));
     const enrichmentConfirmed = await saveVocabulary(enriched, true);
     if (enrichmentConfirmed) {
-      setVocabulary((items) => items.map((item) => item.id === enrichmentConfirmed.id ? enrichmentConfirmed : item));
+      setVocabulary((items) => dedupeVocabularyItems(items.map((item) => item.id === enrichmentConfirmed.id ? enrichmentConfirmed : item)));
       flash(enriched.enrichmentStatus === "ready" ? `“${term}” is ready to learn` : `“${term}” is safe · add context when ready`);
     }
   };
@@ -290,12 +349,14 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
   };
   const addCandidate = async (item: Candidate, status = "Learning") => {
     const saved = normalizeVocabularyItem({ ...item, sourceType: "work", hasOriginalContext: true, tags: ["From work"], enrichmentStatus: "ready", review: initialReviewPlan(), status: status as VocabularyItem["status"] });
-    const confirmed = await saveVocabulary(saved, true);
+    const existing = vocabulary.find((entry) => sameVocabularyTerm(entry.term, saved.term));
+    const itemToSave = existing ? mergeVocabularyItems(existing, saved) : saved;
+    const confirmed = await saveVocabulary(itemToSave, true);
     if (!confirmed) {
       flash(`“${item.term}” was not added · retry when account memory reconnects`);
       return;
     }
-    setVocabulary((items) => items.some((entry) => entry.id === item.id) ? items : [confirmed, ...items]);
+    setVocabulary((items) => dedupeVocabularyItems([confirmed, ...items.filter((entry) => entry.id !== confirmed.id)]));
   };
   const submitAnswer = () => { const evaluation = evaluateAnswer(answer, currentCandidate); setResult(evaluation); setAnswerMode("result"); if (evaluation !== "Correct") void addCandidate(currentCandidate); };
   const nextCandidate = () => {
@@ -312,7 +373,7 @@ export function CoachApp({ user, onSignOut }: { user: User; onSignOut: () => Pro
         flash("Review not saved · reconnect and tap Continue again");
         return;
       }
-      setVocabulary((all) => all.map((entry) => entry.id === confirmed.id ? confirmed : entry));
+      setVocabulary((all) => dedupeVocabularyItems(all.map((entry) => entry.id === confirmed.id ? confirmed : entry)));
       const alreadyQueuedAgain = practiceQueue.slice(practiceIndex + 1).some((entry) => entry.id === item.id);
       const timesShown = practiceQueue.slice(0, practiceIndex + 1).filter((entry) => entry.id === item.id).length;
       const repeatThisSession = (evaluation === "incorrect" || evaluation === "unknown") && !alreadyQueuedAgain && timesShown === 1 && practiceQueue.length < 8;
@@ -527,11 +588,12 @@ function CandidateReview({ item, index, total, mode, choose, selfRating, answer,
 }
 
 function VocabularyPage({ items, navigate }: { items: VocabularyItem[]; navigate: (view: View) => void }) {
-  const [selectedId, setSelectedId] = useState(items[0]?.id ?? "");
-  const selected = items.find((item) => item.id === selectedId) ?? items[0];
+  const uniqueItems = useMemo(() => dedupeVocabularyItems(items), [items]);
+  const [selectedId, setSelectedId] = useState(uniqueItems[0]?.id ?? "");
+  const selected = uniqueItems.find((item) => item.id === selectedId) ?? uniqueItems[0];
   const reviewLabel = selected?.review ? (selected.review.intervalDays === 0 ? "Due now" : new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(selected.review.dueAt))) : "Due now";
   if (!selected) return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Only words saved to your signed-in account appear here." onBack={() => navigate("practice")} /><section className="vocabulary-empty"><Icon name="book" /><h2>No personal words saved yet.</h2><p>Example words are never shown as your memory. Add one real word and Encher will verify it against your private account before it appears here.</p><button className="solid-button" onClick={() => navigate("home")}>Add my first word</button></section></main>;
-  return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Meaning, real context, and a review plan for every word." onBack={() => navigate("practice")} /><div className="library-layout"><section className="vocab-list"><div className="list-toolbar"><span>{items.length} items</span><button onClick={() => navigate("today")}>Review due</button></div>{items.map((item) => <button key={item.id} className={selected?.id === item.id ? "selected" : ""} onClick={() => setSelectedId(item.id)}><span><b>{item.term}</b><small>{item.definition}</small></span><em>{item.enrichmentStatus === "pending" ? "Adding meaning…" : item.status}</em></button>)}</section>{selected && <section className="vocab-detail"><div className="detail-top"><div><div className="vocab-tags"><span className="status-pill">{selected.status}</span>{selected.tags?.map((tag) => <span key={tag} className="source-tag">{tag}</span>)}</div><h2>{selected.term}</h2><p className="pronunciation">{selected.pronunciation} {selected.partOfSpeech && <em>{selected.partOfSpeech}</em>} <button aria-label="Audio pronunciation arrives in V2" disabled>▶</button></p></div><ProgressRing value={Math.round(Object.values(selected.mastery).reduce((a, b) => a + b, 0) / 6)} /></div><p className="definition">{selected.definition}</p>{selected.chinese && <p className="chinese">{selected.chinese}</p>}{selected.usageNote && <div className="dictionary-usage"><b>How to use it</b><p>{selected.usageNote}</p>{selected.collocations?.length ? <small>Common: {selected.collocations.join(" · ")}</small> : null}</div>}<div className="origin"><small>{selected.hasOriginalContext ? `WHERE YOU FOUND IT · ${selected.source}` : "SUPPLIED EXAMPLE · ORIGINAL WORK SENTENCE NOT CAPTURED"}</small><blockquote>“{selected.sentence}”</blockquote><p>{selected.context}</p></div><div className="review-plan-card"><div><Icon name="clock" /><span><small>NEXT REVIEW</small><b>{reviewLabel}</b></span></div><div><span><small>CURRENT INTERVAL</small><b>{selected.review?.intervalDays ? `${selected.review.intervalDays} days` : "New"}</b></span><span><small>LAST RESULT</small><b>{selected.review?.lastResult?.replace("partial", "Partly correct") ?? "Not reviewed"}</b></span></div><p>Correct answers increase the interval. Incorrect answers return in the same session and again tomorrow.</p></div><h3>Mastery profile</h3><div className="mastery-grid">{Object.entries(selected.mastery).map(([key, value]) => <div key={key}><span><b>{key.replace(/([A-Z])/g, " $1")}</b><em>{value}%</em></span><i><span style={{ width: `${value}%` }} /></i></div>)}</div><div className="coach-note"><Icon name="spark" /><p><b>Why this is here</b>{selected.reason}</p></div></section>}</div></main>;
+  return <main className="app-page detail-page wide"><PageHead title="My Vocabulary" subtitle="Meaning, real context, and a review plan for every word." onBack={() => navigate("practice")} /><div className="library-layout"><section className="vocab-list"><div className="list-toolbar"><span>{uniqueItems.length} items</span><button onClick={() => navigate("today")}>Review due</button></div>{uniqueItems.map((item) => <button key={item.id} className={selected?.id === item.id ? "selected" : ""} onClick={() => setSelectedId(item.id)}><span><b>{item.term}</b><small>{item.definition}</small></span><em>{item.enrichmentStatus === "pending" ? "Adding meaning…" : item.status}</em></button>)}</section>{selected && <section className="vocab-detail"><div className="detail-top"><div><div className="vocab-tags"><span className="status-pill">{selected.status}</span>{selected.tags?.map((tag) => <span key={tag} className="source-tag">{tag}</span>)}</div><h2>{selected.term}</h2><p className="pronunciation">{selected.pronunciation} {selected.partOfSpeech && <em>{selected.partOfSpeech}</em>} <button aria-label="Audio pronunciation arrives in V2" disabled>▶</button></p></div><ProgressRing value={Math.round(Object.values(selected.mastery).reduce((a, b) => a + b, 0) / 6)} /></div><p className="definition">{selected.definition}</p>{selected.chinese && <p className="chinese">{selected.chinese}</p>}{selected.usageNote && <div className="dictionary-usage"><b>How to use it</b><p>{selected.usageNote}</p>{selected.collocations?.length ? <small>Common: {selected.collocations.join(" · ")}</small> : null}</div>}<div className="origin"><small>{selected.hasOriginalContext ? `WHERE YOU FOUND IT · ${selected.source}` : "SUPPLIED EXAMPLE · ORIGINAL WORK SENTENCE NOT CAPTURED"}</small><blockquote>“{selected.sentence}”</blockquote><p>{selected.context}</p></div><div className="review-plan-card"><div><Icon name="clock" /><span><small>NEXT REVIEW</small><b>{reviewLabel}</b></span></div><div><span><small>CURRENT INTERVAL</small><b>{selected.review?.intervalDays ? `${selected.review.intervalDays} days` : "New"}</b></span><span><small>LAST RESULT</small><b>{selected.review?.lastResult?.replace("partial", "Partly correct") ?? "Not reviewed"}</b></span></div><p>Correct answers increase the interval. Incorrect answers return in the same session and again tomorrow.</p></div><h3>Mastery profile</h3><div className="mastery-grid">{Object.entries(selected.mastery).map(([key, value]) => <div key={key}><span><b>{key.replace(/([A-Z])/g, " $1")}</b><em>{value}%</em></span><i><span style={{ width: `${value}%` }} /></i></div>)}</div><div className="coach-note"><Icon name="spark" /><p><b>Why this is here</b>{selected.reason}</p></div></section>}</div></main>;
 }
 
 function TodayListening({ items, index, answer, setAnswer, revealed, setRevealed, evaluation, setEvaluation, complete, completeReview, restart, navigate }: { items: VocabularyItem[]; index: number; answer: string; setAnswer: (value: string) => void; revealed: boolean; setRevealed: (value: boolean) => void; evaluation: VocabularyEvaluation | null; setEvaluation: (value: VocabularyEvaluation | null) => void; complete: boolean; completeReview: (evaluation: VocabularyEvaluation, promptType: VocabularyReviewAttempt["promptType"]) => void; restart: () => void; navigate: (view: View) => void }) {

@@ -20,6 +20,7 @@ Encher turns real workplace conversations into personalized comprehension and ex
 - Explicit correct/partial/incorrect feedback and an account-backed adaptive review calendar
 - Account/password sign-in with per-user cloud memory
 - Verifiable vocabulary memory: every save is written, read back by account and ID, then acknowledged
+- Case-insensitive vocabulary identity: repeated terms merge into one entry while preserving the strongest learning evidence
 - No demo words in personal vocabulary and no sample-data fallback when cloud memory is unavailable
 - Functional speaking correction and active reproduction
 - Clear text-versus-audio capability boundary; recording is intentionally V2

@@ -56,3 +56,7 @@ The three launch-readiness demo words are no longer initialized, auto-written, o
 ## Capture-first home pass
 
 The former Add experience is now the default Home screen because adding a word is the learner’s highest-frequency behavior. Quick Add appears before account diagnostics and meeting-import options, so the main action is immediately reachable after sign-in. The redundant Add destination was removed from bottom navigation, leaving a simpler Home / Practice / Me structure; all empty-state and import back actions now return to the capture-first Home.
+
+## Vocabulary identity pass
+
+Vocabulary is now identified by meaningfully normalized text, so `bespoke`, `Bespoke`, and space-padded variants appear as one learning item. Account loading, Quick Add, transcript candidates, enrichment, review updates, the practice queue, and My Vocabulary all share the same deduplication rule. Existing records are merged without destructive deletion: Encher keeps the richer explanation and context, strongest mastery values, source tags, and unique review history.

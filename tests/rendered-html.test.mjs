@@ -106,6 +106,20 @@ test("never presents system samples as personal account memory", async () => {
   assert.doesNotMatch(app, /const seeded = seedVocabulary/);
 });
 
+test("deduplicates vocabulary by normalized term without discarding learning evidence", async () => {
+  const app = await read("app/components/CoachApp.tsx");
+  assert.match(app, /function vocabularyTermKey/);
+  assert.match(app, /replace\(\/\\s\+\/g, " "\)\.toLocaleLowerCase\("en-US"\)/);
+  assert.match(app, /function mergeVocabularyItems/);
+  assert.match(app, /function dedupeVocabularyItems/);
+  assert.match(app, /const loaded = dedupeVocabularyItems/);
+  assert.match(app, /const uniqueItems = useMemo\(\(\) => dedupeVocabularyItems\(items\), \[items\]\)/);
+  assert.match(app, /sameVocabularyTerm\(item\.term, term\)/);
+  assert.match(app, /id: `quick-\$\{encodeURIComponent\(vocabularyTermKey\(normalizedTerm\)\)\}`/);
+  assert.match(app, /review: \{ \.\.\.preferredReview, history: reviewHistory \}/);
+  assert.doesNotMatch(app, /\$\{Date\.now\(\)\}/);
+});
+
 test("implements the professional speaking diagnosis and active correction loop", async () => {
   const app = await read("app/components/CoachApp.tsx");
   assert.match(app, /My English Error Map/);
@@ -180,7 +194,7 @@ test("is installable as a standalone PWA", async () => {
   assert.equal(manifest.short_name, "Encher");
   assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512"));
-  assert.match(serviceWorker, /encher-shell-v4/);
+  assert.match(serviceWorker, /encher-shell-v5/);
   assert.match(entry, /apple-mobile-web-app-capable/);
   await access(new URL("public/icon-192.png", root));
   await access(new URL("public/icon-512.png", root));

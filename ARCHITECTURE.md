@@ -49,6 +49,8 @@ Quick Add treats PostgreSQL as the source of truth instead of optimistic in-memo
 
 Personal vocabulary always starts empty in memory and is populated only from the authenticated database query. The old three-word launch-readiness sample is excluded from personal vocabulary and is never used as a fallback when a query fails. Home exposes the signed-in email, the actual cloud-read word count, the latest verification time, and a manual verification action. A failed query preserves the error state instead of fabricating a usable vocabulary snapshot.
 
+Vocabulary identity is based on a normalized term key: casing, leading or trailing whitespace, and repeated internal spaces do not create new learning items. Existing duplicate rows are merged into one in the learner model without deleting source records; the richer definition and context, highest mastery values, tags, and unique review attempts are retained. Quick Add now uses the same deterministic identity and transcript candidates update the matching personal item instead of adding another visible copy.
+
 ## PWA boundary
 
 The GitHub Pages and private-site builds share the same application source. A standalone manifest, safe-area-aware bottom navigation, install icons, and scope-aware service worker make the public version installable. The service worker uses network-first caching so private, changing learner data is not treated as a static offline source of truth.
