@@ -7,6 +7,8 @@ Encher turns real workplace conversations into personalized comprehension and ex
 - App-like Home / Add / Practice / Me navigation
 - One dedicated Add destination for quick words and meeting text
 - Installable PWA for iPhone and desktop
+- Capture-first Home with immediate verified Quick Add
+- Primary navigation reduced to Home / Practice / Me
 - Practice tabs organized by outcome: Today / Vocabulary / Understand / Express
 - Quick Add Word with cloud persistence
 - Server-confirmed Quick Add saves with visible retry state and a recent-save receipt

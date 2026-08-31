@@ -1,4 +1,4 @@
-export type View = "home" | "add" | "practice" | "import" | "review" | "vocabulary" | "today" | "sentence" | "speaking-practice" | "roadmap" | "me";
+export type View = "home" | "practice" | "import" | "review" | "vocabulary" | "today" | "sentence" | "speaking-practice" | "roadmap" | "me";
 
 export type Mastery = {
   recognition: number;

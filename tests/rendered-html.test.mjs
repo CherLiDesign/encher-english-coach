@@ -5,12 +5,17 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("uses the action-based four-tab app architecture", async () => {
+test("opens on a capture-first home with three primary tabs", async () => {
   const app = await read("app/components/CoachApp.tsx");
-  for (const tab of ["Home", "Add", "Practice", "Me"]) assert.match(app, new RegExp(`label: "${tab}"`));
+  for (const tab of ["Home", "Practice", "Me"]) assert.match(app, new RegExp(`label: "${tab}"`));
+  assert.doesNotMatch(app, /label: "Add"/);
   assert.doesNotMatch(app, /label: "Listen"/);
   assert.doesNotMatch(app, /label: "Speak"/);
-  assert.match(app, /function AddPage/);
+  assert.match(app, /useState<View>\("home"\)/);
+  assert.match(app, /view === "home" && <HomePage/);
+  assert.match(app, /function HomePage/);
+  assert.match(app, /Add a word\./);
+  assert.match(app, /QUICK WORD OR PHRASE/);
   assert.match(app, /function PracticeHub/);
   assert.match(app, /view === "today"/);
   assert.match(app, /TodayListening/);
@@ -175,7 +180,7 @@ test("is installable as a standalone PWA", async () => {
   assert.equal(manifest.short_name, "Encher");
   assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512"));
-  assert.match(serviceWorker, /encher-shell-v3/);
+  assert.match(serviceWorker, /encher-shell-v4/);
   assert.match(entry, /apple-mobile-web-app-capable/);
   await access(new URL("public/icon-192.png", root));
   await access(new URL("public/icon-512.png", root));

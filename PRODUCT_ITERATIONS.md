@@ -52,3 +52,7 @@ Quick Add no longer says “saved” based on temporary page state. It waits for
 ## Verifiable memory pass
 
 The three launch-readiness demo words are no longer initialized, auto-written, or displayed as personal vocabulary. An account starts with only the records actually read from its private database; a failed read shows a blocking error instead of sample data. Every vocabulary write is followed by a separate account-scoped read-back, and the Add screen now shows the signed-in email, verified personal-word count, verification time, and a manual Verify now action. The empty vocabulary page explicitly distinguishes real personal memory from examples.
+
+## Capture-first home pass
+
+The former Add experience is now the default Home screen because adding a word is the learner’s highest-frequency behavior. Quick Add appears before account diagnostics and meeting-import options, so the main action is immediately reachable after sign-in. The redundant Add destination was removed from bottom navigation, leaving a simpler Home / Practice / Me structure; all empty-state and import back actions now return to the capture-first Home.

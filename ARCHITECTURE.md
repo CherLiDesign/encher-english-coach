@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Comprehension and expression remain distinct learning interventions backed by one authenticated learner model. Every learning item keeps a path to the work conversation that produced it. The shell uses four action-based destinations—Home, Add, Practice, and Me. Add owns all capture; Practice organizes learning by outcome through Today, Vocabulary, Understand, and Express.
+Comprehension and expression remain distinct learning interventions backed by one authenticated learner model. Every learning item keeps a path to the work conversation that produced it. The shell uses three action-based destinations—Home, Practice, and Me. Home owns the highest-frequency capture behavior; Practice organizes learning by outcome through Today, Vocabulary, Understand, and Express.
 
 ## Runtime and folders
 
@@ -19,8 +19,8 @@ The MVP uses React, TypeScript, Vinext/Vite, Tailwind CSS, Supabase Auth, and Po
 ## Main user flows
 
 1. Sign in → load only the authenticated user’s vocabulary and history.
-2. Home → see one prioritized next session or jump to Add/Practice.
-3. Add → save a term or route meeting text into comprehension/expression diagnosis in seconds.
+2. Home → immediately save a term or route meeting text into comprehension/expression diagnosis in seconds.
+3. Practice → enter the highest-priority review or choose Vocabulary, Understand, or Express.
 4. Import → store a private conversation → generate candidates → test contextual understanding → add weak items.
 5. Vocabulary/Understand → mix context, meaning, blank, new-context, and speaker-intent exercises → record performance → update mastery.
 6. Express → show a real user turn → explain the communication problem → preserve intent → require a new attempt → evaluate and save it. Grammar and, when audio exists, pronunciation appear inside the expression task instead of as disconnected subjects.
@@ -47,7 +47,7 @@ Quick-added terms are enriched through a replaceable dictionary provider chain: 
 
 Quick Add treats PostgreSQL as the source of truth instead of optimistic in-memory state. The Add input stays unavailable until the authenticated vocabulary snapshot has loaded, eliminating the startup race that could replace a newly added word with an older snapshot. A new word remains in the input until Encher completes two separate operations: write the row, then read the same user-owned row back by ID and verify its term. Failure produces an explicit retry state; success produces a read-back receipt and an entry in Recently Saved. Dictionary enrichment happens only after that durable first write, so an enrichment failure can delay the meaning but cannot remove the original word.
 
-Personal vocabulary always starts empty in memory and is populated only from the authenticated database query. The old three-word launch-readiness sample is excluded from personal vocabulary and is never used as a fallback when a query fails. The Add screen exposes the signed-in email, the actual cloud-read word count, the latest verification time, and a manual verification action. A failed query preserves the error state instead of fabricating a usable vocabulary snapshot.
+Personal vocabulary always starts empty in memory and is populated only from the authenticated database query. The old three-word launch-readiness sample is excluded from personal vocabulary and is never used as a fallback when a query fails. Home exposes the signed-in email, the actual cloud-read word count, the latest verification time, and a manual verification action. A failed query preserves the error state instead of fabricating a usable vocabulary snapshot.
 
 ## PWA boundary
 
