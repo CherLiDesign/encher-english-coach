@@ -88,12 +88,30 @@ test("confirms quick-word persistence before claiming a save", async () => {
   assert.match(app, /if \(!confirmedItem\)[\s\S]*?setQuickSaveState\("error"\)/);
   assert.match(app, /Your text is still here—tap Retry/);
   assert.match(app, /disabled=\{saving \|\| !memoryReady\}/);
-  assert.match(app, /Recently saved/);
+  assert.match(app, /Your Word Library/);
   assert.match(app, /Saved and read back/);
   assert.match(app, /Verify now/);
   assert.match(app, /personal.*words.*verified/);
   assert.match(app, /already in your account/);
   assert.doesNotMatch(app, /Saved here; cloud sync needs attention/);
+});
+
+test("turns every quick add into an immediate study card and keeps practice answers hidden", async () => {
+  const [app, dictionary] = await Promise.all([
+    read("app/components/CoachApp.tsx"),
+    read("app/lib/dictionary.ts"),
+  ]);
+  assert.match(app, /function QuickLearnCard/);
+  for (const label of ["JUST ADDED · STUDY MODE", "MEANING", "HOW TO USE IT", "WORKPLACE EXAMPLE", "Open full entry"]) assert.match(app, new RegExp(label));
+  assert.match(app, /Study mode · answers visible/);
+  assert.match(app, /PRACTICE MODE · ANSWERS HIDDEN/);
+  assert.match(app, /Search your words and phrases/);
+  assert.match(app, /lastSavedItem/);
+  assert.match(app, /showing its meaning/);
+  assert.match(app, /speechSynthesis/);
+  assert.match(app, /\{!revealed \? /);
+  assert.match(app, /item\.enrichmentStatus === "unavailable"/);
+  for (const term of ["cordoned off", "criteria", "occasional"]) assert.match(dictionary, new RegExp(term));
 });
 
 test("never presents system samples as personal account memory", async () => {
@@ -194,7 +212,7 @@ test("is installable as a standalone PWA", async () => {
   assert.equal(manifest.short_name, "Encher");
   assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512"));
-  assert.match(serviceWorker, /encher-shell-v5/);
+  assert.match(serviceWorker, /encher-shell-v6/);
   assert.match(entry, /apple-mobile-web-app-capable/);
   await access(new URL("public/icon-192.png", root));
   await access(new URL("public/icon-512.png", root));

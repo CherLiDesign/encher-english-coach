@@ -13,6 +13,8 @@ Encher turns real workplace conversations into personalized comprehension and ex
 - Quick Add Word with cloud persistence
 - Server-confirmed Quick Add saves with visible retry state and a recent-save receipt
 - Automatic dictionary enrichment with simple meaning, usage, collocations, and examples
+- Immediate post-add study card with visible meaning, Chinese support, pronunciation playback, usage, and a workplace example
+- Searchable Word Library for answer-visible study, clearly separated from answer-hidden retrieval practice
 - Transcript import and candidate detection
 - Contextual vocabulary checks
 - Dimension-level vocabulary mastery

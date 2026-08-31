@@ -60,3 +60,7 @@ The former Add experience is now the default Home screen because adding a word i
 ## Vocabulary identity pass
 
 Vocabulary is now identified by meaningfully normalized text, so `bespoke`, `Bespoke`, and space-padded variants appear as one learning item. Account loading, Quick Add, transcript candidates, enrichment, review updates, the practice queue, and My Vocabulary all share the same deduplication rule. Existing records are merged without destructive deletion: Encher keeps the richer explanation and context, strongest mastery values, source tags, and unique review history.
+
+## Add-to-understanding pass
+
+Quick Add no longer ends with a database confirmation. The new word stays on Home as an immediate learning card while Encher adds its simple meaning, Chinese support, pronunciation, practical usage note, common patterns, and a workplace example. A searchable Word Library is explicitly labeled Study mode with answers visible, while Vocabulary Practice is explicitly labeled Practice mode with answers hidden until the learner responds. Pronunciation playback uses the device voice and remains separate from V2 pronunciation assessment.
