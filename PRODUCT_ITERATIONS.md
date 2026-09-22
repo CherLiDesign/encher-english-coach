@@ -64,3 +64,7 @@ Vocabulary is now identified by meaningfully normalized text, so `bespoke`, `Bes
 ## Add-to-understanding pass
 
 Quick Add no longer ends with a database confirmation. The new word stays on Home as an immediate learning card while Encher adds its simple meaning, Chinese support, pronunciation, practical usage note, common patterns, and a workplace example. A searchable Word Library is explicitly labeled Study mode with answers visible, while Vocabulary Practice is explicitly labeled Practice mode with answers hidden until the learner responds. Pronunciation playback uses the device voice and remains separate from V2 pronunciation assessment.
+
+## Screenshot vocabulary intake pass
+
+The workplace-English knowledge base now covers all fifteen words and expressions captured from the learner's lesson screenshots, including accurate meaning, Chinese support, pronunciation, register, collocations, and realistic workplace examples. Informal expressions explain their interpersonal risk and offer softer alternatives. One repeated item, `workaround`, remains a single learning record. The misleading screenshot pairing for `low on the totem pole` is corrected: it means low status or priority, while `swamped` means very busy. Vocabulary identity now treats straight and curly apostrophes, extra spacing, and sentence-ending punctuation as the same item, preventing duplicate entries such as `I'm…` and `I’m…`.

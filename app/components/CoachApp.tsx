@@ -53,7 +53,12 @@ function isLegacyDemoItem(item: VocabularyItem) {
 }
 
 function vocabularyTermKey(term: string) {
-  return term.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+  return term
+    .trim()
+    .replace(/[’‘]/g, "'")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?]+$/, "")
+    .toLocaleLowerCase("en-US");
 }
 
 function sameVocabularyTerm(first: string, second: string) {

@@ -114,6 +114,32 @@ test("turns every quick add into an immediate study card and keeps practice answ
   for (const term of ["cordoned off", "criteria", "occasional"]) assert.match(dictionary, new RegExp(term));
 });
 
+test("teaches every word and expression captured from the learner's screenshots", async () => {
+  const dictionary = await read("app/lib/dictionary.ts");
+  const capturedVocabulary = [
+    "learn the ropes",
+    "back to square one",
+    "versatile",
+    "adequate",
+    "substantial",
+    "exceptional",
+    "i don't buy it",
+    "i'm just messing with you",
+    "what have you gotten yourself into",
+    "you've got to be kidding me",
+    "get to the root of the problem",
+    "workaround",
+    "hit a roadblock",
+    "low on the totem pole",
+    "swamped",
+  ];
+  for (const term of capturedVocabulary) assert.match(dictionary, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+  assert.match(dictionary, /I’m not convinced/);
+  assert.match(dictionary, /casual, friendly relationships/);
+  assert.match(dictionary, /This does not mean “very busy.”/);
+  assert.match(dictionary, /simple meaning|definition/);
+});
+
 test("never presents system samples as personal account memory", async () => {
   const app = await read("app/components/CoachApp.tsx");
   assert.match(app, /useState<VocabularyItem\[\]>\(\[\]\)/);
@@ -127,7 +153,9 @@ test("never presents system samples as personal account memory", async () => {
 test("deduplicates vocabulary by normalized term without discarding learning evidence", async () => {
   const app = await read("app/components/CoachApp.tsx");
   assert.match(app, /function vocabularyTermKey/);
-  assert.match(app, /replace\(\/\\s\+\/g, " "\)\.toLocaleLowerCase\("en-US"\)/);
+  assert.match(app, /replace\(\/\[’‘\]\/g, "'"\)/);
+  assert.match(app, /replace\(\/\\s\+\/g, " "\)/);
+  assert.ok(app.includes('.replace(/[.!?]+$/, "")'));
   assert.match(app, /function mergeVocabularyItems/);
   assert.match(app, /function dedupeVocabularyItems/);
   assert.match(app, /const loaded = dedupeVocabularyItems/);
@@ -212,7 +240,7 @@ test("is installable as a standalone PWA", async () => {
   assert.equal(manifest.short_name, "Encher");
   assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
   assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512"));
-  assert.match(serviceWorker, /encher-shell-v6/);
+  assert.match(serviceWorker, /encher-shell-v8/);
   assert.match(entry, /apple-mobile-web-app-capable/);
   await access(new URL("public/icon-192.png", root));
   await access(new URL("public/icon-512.png", root));

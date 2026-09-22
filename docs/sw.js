@@ -1,4 +1,4 @@
-const CACHE_NAME = "encher-shell-v6";
+const CACHE_NAME = "encher-shell-v8";
 const scopePath = new URL(self.registration.scope).pathname;
 const shell = [scopePath, `${scopePath}manifest.webmanifest`, `${scopePath}encher-icon.svg`];
 
